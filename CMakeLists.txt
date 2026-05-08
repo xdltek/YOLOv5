@@ -41,7 +41,12 @@ include_directories(${RppRT_INCLUDE_DIRS})
 set(SAMPLE_NAME yolov5_demo)
 set(SAMPLE_SOURCE_FILES
     ${ROOT_DIRECTORY}/yolov5/main.cpp
+    ${ROOT_DIRECTORY}/yolov5/labels.cpp
+    ${ROOT_DIRECTORY}/yolov5/postprocess.cpp
+    ${ROOT_DIRECTORY}/yolov5/preprocess.cpp
+    ${ROOT_DIRECTORY}/yolov5/visualize.cpp
     ${ROOT_DIRECTORY}/yolov5/yolo.cpp
+    ${ROOT_DIRECTORY}/yolov5/yolo_demo_pipeline.cpp
     ${ROOT_DIRECTORY}/common/logger.cpp
 )
 set(LOGGER_SOURCES

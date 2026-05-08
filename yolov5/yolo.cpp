@@ -7,6 +7,8 @@
 #include "logger.h"
 #include "sampleCommon.h"
 
+#include <stdexcept>
+
 /**
  * @brief Parse ONNX graph, configure builder options, and create runtime buffers.
  * @return True when engine creation and binding metadata initialization succeed.
@@ -73,6 +75,7 @@ bool Yolo::init_engine() {
     for (int i =0; i < engine_ptr_->getNbBindings(); i++) {
         if (engine_ptr_->bindingIsInput(i)) {
             // Cache input binding metadata used for host buffer sizing and shape mapping.
+            input_index_ = i;
             input_name_ = engine_ptr_->getBindingName(i);
             input_dimensions_ = engine_ptr_->getBindingDimensions(i);
             input_data_type_ = engine_ptr_->getBindingDataType(i);
@@ -84,6 +87,7 @@ bool Yolo::init_engine() {
         }
         else {
             // Cache output binding metadata used for post-processing buffer reads.
+            output_index_ = i;
             output_name_ = engine_ptr_->getBindingName(i);
             output_dimensions_ = engine_ptr_->getBindingDimensions(i);
             output_data_type_ = engine_ptr_->getBindingDataType(i);
@@ -96,77 +100,114 @@ bool Yolo::init_engine() {
     if (buffer_ptr_ == nullptr) {
         return false;
     }
+    // Keep one execution context alive for the model instance. The caller can reuse
+    // the same input/output buffers and context across multiple inference requests.
+    context_ptr_.reset(engine_ptr_->createExecutionContext());
+    if (context_ptr_ == nullptr) {
+        return false;
+    }
+    warmup_done_ = false;
     return true;
 }
 
-/**
- * @brief Copy input tensor to device, execute inference, and read back output tensor.
- * @param processed_image Input tensor blob produced by preprocessing.
- * @param inference_count Number of execution loops used for profiling.
- * @param output_data Output vector that receives flattened model output.
- * @return True when inference and host output collection complete.
- */
-bool Yolo::infer(cv::Mat& processed_image, int inference_count, std::vector<float>& output_data) {
+size_t Yolo::getInputByteSize() const
+{
+    return input_tensor_size_ * samplesCommon::getElementSize(input_data_type_);
+}
 
-    // Flatten OpenCV blob memory to contiguous float vector expected by runtime host buffer.
-    std::vector<float> input_tensor_values;
-    input_tensor_values.assign((float*)processed_image.datastart, (float*)processed_image.dataend);
+size_t Yolo::getOutputByteSize() const
+{
+    return output_tensor_size_ * samplesCommon::getElementSize(output_data_type_);
+}
 
-    // Copy host input tensor into the runtime-managed host buffer.
-    // getElementSize handles runtime data type width (fp32/fp16/int8...) correctly.
-    size_t input_data_size = input_tensor_size_ * samplesCommon::getElementSize(input_data_type_);
-    memcpy(buffer_ptr_->getHostBuffer(input_name_), input_tensor_values.data(), input_data_size);
+void* Yolo::getInputHostBuffer() const
+{
+    return buffer_ptr_ == nullptr ? nullptr : buffer_ptr_->getHostBuffer(input_name_);
+}
 
-    // Create per-run execution context; bindings are reused from buffer manager.
-    std::unique_ptr<infer1::IExecutionContext> context {engine_ptr_->createExecutionContext()};
-    // Push prepared host input into device memory before execution.
+void* Yolo::getOutputHostBuffer() const
+{
+    return buffer_ptr_ == nullptr ? nullptr : buffer_ptr_->getHostBuffer(output_name_);
+}
+
+void* Yolo::getInputDeviceBuffer() const
+{
+    return buffer_ptr_ == nullptr ? nullptr : buffer_ptr_->getDeviceBuffer(input_name_);
+}
+
+void* Yolo::getOutputDeviceBuffer() const
+{
+    return buffer_ptr_ == nullptr ? nullptr : buffer_ptr_->getDeviceBuffer(output_name_);
+}
+
+std::vector<void*>& Yolo::getDeviceBindings()
+{
+    if (buffer_ptr_ == nullptr) {
+        throw std::runtime_error("Yolo engine has not been initialized.");
+    }
+    return buffer_ptr_->getDeviceBindings();
+}
+
+const std::vector<void*>& Yolo::getDeviceBindings() const
+{
+    if (buffer_ptr_ == nullptr) {
+        throw std::runtime_error("Yolo engine has not been initialized.");
+    }
+    return buffer_ptr_->getDeviceBindings();
+}
+
+bool Yolo::copyInputToDevice()
+{
+    if (buffer_ptr_ == nullptr) {
+        sample::LOG_ERROR() << "Yolo engine has not been initialized." << std::endl;
+        return false;
+    }
     buffer_ptr_->copyInputToDevice();
+    return true;
+}
 
-    samplesCommon::PreciseCpuTimer infer_timer;
+bool Yolo::copyOutputToHost()
+{
+    if (buffer_ptr_ == nullptr) {
+        sample::LOG_ERROR() << "Yolo engine has not been initialized." << std::endl;
+        return false;
+    }
+    buffer_ptr_->copyOutputToHost();
+    return true;
+}
 
-    // Warm-up run to avoid counting one-time initialization overhead.
-    bool ok = context->execute(1, buffer_ptr_->getDeviceBindings().data());
-    if (!ok)
-    {
-        sample::LOG_ERROR() << "do inference failed." << std::endl;
+bool Yolo::executeContext()
+{
+    if (context_ptr_ == nullptr || buffer_ptr_ == nullptr) {
+        sample::LOG_ERROR() << "Yolo engine has not been initialized." << std::endl;
         return false;
     }
 
-    infer_timer.reset();
-    infer_timer.start();
-
-    // Execute multiple rounds for stable latency/FPS measurement.
-    for (int i = 0; i < inference_count; i++)
-    {
-        ok = context->execute(1, buffer_ptr_->getDeviceBindings().data());
-        if (!ok)
-        {
-            throw std::runtime_error("execute failed.");
-        }
+    bool ok = context_ptr_->execute(1, buffer_ptr_->getDeviceBindings().data());
+    if (!ok) {
+        sample::LOG_ERROR() << "do inference failed." << std::endl;
+        return false;
     }
-
-    infer_timer.stop();
-    float infer_cost = infer_timer.milliseconds();
-
-    if (inference_count == 1) {
-        // Report single-run latency and derived FPS.
-        sample::user_visible_stream_log("inference takes: ", infer_cost, "  milliseconds, frames per second: ", int(1000.0f / infer_cost));
-    }
-    else {
-        // Report aggregated and averaged metrics for loop-mode benchmarking.
-        float average_cost = infer_cost / (float(inference_count) * 1.0f);
-        sample::user_visible_stream_log("inference [", inference_count, "] times, total takes: ", infer_cost, "  milliseconds, average inference time: ", average_cost, ", frames per second: ", int(1000.0f / average_cost));
-    }
-
-    // Pull inference outputs back to host memory for post-processing.
-    buffer_ptr_->copyOutputToHost();
-
-    // Flatten output tensor from host buffer into std::vector for downstream decode logic.
-    output_data.clear();
-    float* output_data_ptr = (float*)buffer_ptr_->getHostBuffer(output_name_);
-    for (int i = 0; i < output_tensor_size_; i++) {
-        output_data.emplace_back(output_data_ptr[i]);
-    }
-
     return true;
+}
+
+bool Yolo::warmup()
+{
+    if (warmup_done_) {
+        return true;
+    }
+
+    bool ok = executeContext();
+    if (ok) {
+        warmup_done_ = true;
+    }
+    return ok;
+}
+
+bool Yolo::execute()
+{
+    if (!warmup()) {
+        return false;
+    }
+    return executeContext();
 }
