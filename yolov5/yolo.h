@@ -52,6 +52,7 @@ public:
     bool copyOutputToHost();
     bool warmup();
     bool execute();
+    bool enqueue(rtStream_t stream);
     bool isWarmupDone() const { return warmup_done_; }
 
 private:

@@ -27,4 +27,11 @@ bool decode_yolov5_output(const std::vector<float>& output_data,
                           std::vector<Detection>& detections,
                           std::string* error);
 
+bool decode_yolov5_output(const std::vector<float>& output_data,
+                          const LetterboxInfo& letterbox,
+                          const std::vector<std::string>& class_names,
+                          const YoloV5Config& config,
+                          std::vector<Detection>& detections,
+                          std::string* error);
+
 #endif // XDLTEK_SAMPLES_YOLOV5_POSTPROCESS_H

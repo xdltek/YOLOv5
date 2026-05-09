@@ -16,9 +16,11 @@
 #include "logger.h"
 
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -41,6 +43,17 @@ int main(int argc, char **argv)
     program.add_argument("-i", "--image")
             .default_value(std::string("test_1.png"))
             .help("path of image file.");
+    program.add_argument("--yuv")
+            .default_value(std::string(""))
+            .help("path of I420 yuv file.");
+    program.add_argument("--yuv-width")
+            .default_value(0)
+            .help("I420 yuv frame width.")
+            .scan<'i', int>();
+    program.add_argument("--yuv-height")
+            .default_value(0)
+            .help("I420 yuv frame height.")
+            .scan<'i', int>();
     program.add_argument("-v", "--verbose")
             .help("show verbose log")
             .default_value(false)
@@ -66,6 +79,7 @@ int main(int argc, char **argv)
     // Resolve user paths such as "~/" before filesystem checks.
     auto image_path = expand_user_path(program.get<std::string>("--image"));
     auto model_path = expand_user_path(program.get<std::string>("--onnx"));
+    auto yuv_path = expand_user_path(program.get<std::string>("--yuv"));
 
     if (program["--verbose"] == true) {
         // Verbose mode helps inspect runtime/internal execution details.
@@ -80,14 +94,23 @@ int main(int argc, char **argv)
         std::cerr << "Cannot found onnx model file, path: " << model_path << std::endl;
         return EXIT_FAILURE;
     }
-    if (!image_path.empty() && !std::filesystem::exists(image_path)) {
+    if (yuv_path.empty() && !image_path.empty() && !std::filesystem::exists(image_path)) {
         // Input image is required for this demo pipeline.
         std::cerr << "Cannot found image file, path: " << image_path << std::endl;
         return EXIT_FAILURE;
     }
+    if (!yuv_path.empty() && !std::filesystem::exists(yuv_path)) {
+        std::cerr << "Cannot found yuv file, path: " << yuv_path << std::endl;
+        return EXIT_FAILURE;
+    }
 
     sample::user_visible_stream_log("ONNX model path: ", model_path);
-    sample::user_visible_stream_log("Image file path: ", image_path);
+    if (yuv_path.empty()) {
+        sample::user_visible_stream_log("Image file path: ", image_path);
+    }
+    else {
+        sample::user_visible_stream_log("I420 yuv file path: ", yuv_path);
+    }
 
     int inference_count = program.get<int>("--loop");
 
@@ -96,17 +119,43 @@ int main(int argc, char **argv)
     pipeline_options.model_path = model_path;
     pipeline_options.inference_count = inference_count;
 
-    cv::Mat frame = cv::imread(image_path);
-    if (frame.empty()) {
-        // OpenCV failed to decode image bytes into valid matrix data.
-        std::cerr << "Failed to load image: " << image_path << std::endl;
-        return EXIT_FAILURE;
-    }
-
     // Run detection and draw visualization overlays.
     std::vector<Detection> output;
-    if (!detect_yolov5(frame, pipeline_options, class_list, output)) {
-        return EXIT_FAILURE;
+    cv::Mat frame;
+    if (yuv_path.empty()) {
+        frame = cv::imread(image_path);
+        if (frame.empty()) {
+            // OpenCV failed to decode image bytes into valid matrix data.
+            std::cerr << "Failed to load image: " << image_path << std::endl;
+            return EXIT_FAILURE;
+        }
+
+        if (!detect_yolov5(frame, pipeline_options, class_list, output)) {
+            return EXIT_FAILURE;
+        }
+    }
+    else {
+        int yuv_width = program.get<int>("--yuv-width");
+        int yuv_height = program.get<int>("--yuv-height");
+        if (yuv_width <= 0 || yuv_height <= 0) {
+            std::cerr << "--yuv-width and --yuv-height are required for I420 input." << std::endl;
+            return EXIT_FAILURE;
+        }
+
+        size_t yuv_bytes = static_cast<size_t>(yuv_width) * static_cast<size_t>(yuv_height) * 3U / 2U;
+        std::vector<unsigned char> yuv_data(yuv_bytes);
+        std::ifstream yuv_file(yuv_path, std::ios::binary);
+        if (!yuv_file.read(reinterpret_cast<char*>(yuv_data.data()), static_cast<std::streamsize>(yuv_data.size()))) {
+            std::cerr << "Failed to read one I420 frame from: " << yuv_path << std::endl;
+            return EXIT_FAILURE;
+        }
+
+        cv::Mat yuv_mat(yuv_height * 3 / 2, yuv_width, CV_8UC1, yuv_data.data());
+        cv::cvtColor(yuv_mat, frame, cv::COLOR_YUV2BGR_I420);
+
+        if (!detect_yolov5_i420(yuv_data.data(), yuv_data.size(), yuv_width, yuv_height, pipeline_options, class_list, output)) {
+            return EXIT_FAILURE;
+        }
     }
 
     draw_detections(frame, output, class_list);

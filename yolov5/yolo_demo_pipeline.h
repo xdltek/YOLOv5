@@ -9,6 +9,7 @@
 
 #include <opencv2/core.hpp>
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -23,5 +24,13 @@ bool detect_yolov5(const cv::Mat& image,
                    const YoloV5PipelineOptions& options,
                    const std::vector<std::string>& class_names,
                    std::vector<Detection>& detections);
+
+bool detect_yolov5_i420(const void* yuv_data,
+                        size_t yuv_bytes,
+                        int width,
+                        int height,
+                        const YoloV5PipelineOptions& options,
+                        const std::vector<std::string>& class_names,
+                        std::vector<Detection>& detections);
 
 #endif // XDLTEK_SAMPLES_YOLOV5_DEMO_PIPELINE_H

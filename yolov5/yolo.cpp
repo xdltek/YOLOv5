@@ -9,6 +9,31 @@
 
 #include <stdexcept>
 
+namespace
+{
+bool parseInputSpatialDims(const infer1::Dims& dims, int& width, int& height)
+{
+    if (dims.nbDims < 2) {
+        return false;
+    }
+
+    if (dims.nbDims >= 3 && dims.d[dims.nbDims - 1] == 3) {
+        // NHWC/NHWC-like layouts are not expected for current YOLOv5 exports,
+        // but this keeps the metadata sane if such a model appears later.
+        height = dims.d[dims.nbDims - 3];
+        width = dims.d[dims.nbDims - 2];
+    }
+    else {
+        // YOLOv5 ONNX exports are typically CHW or NCHW. In both cases the
+        // spatial dimensions are the last two binding dimensions.
+        height = dims.d[dims.nbDims - 2];
+        width = dims.d[dims.nbDims - 1];
+    }
+
+    return width > 0 && height > 0;
+}
+}
+
 /**
  * @brief Parse ONNX graph, configure builder options, and create runtime buffers.
  * @return True when engine creation and binding metadata initialization succeed.
@@ -80,8 +105,10 @@ bool Yolo::init_engine() {
             input_dimensions_ = engine_ptr_->getBindingDimensions(i);
             input_data_type_ = engine_ptr_->getBindingDataType(i);
 
-            input_height_ = input_dimensions_.d[1];
-            input_width_ = input_dimensions_.d[2];
+            if (!parseInputSpatialDims(input_dimensions_, input_width_, input_height_)) {
+                std::cerr << "Invalid YOLO input dimensions." << std::endl;
+                return false;
+            }
 
             input_tensor_size_ = samplesCommon::volume(input_dimensions_);
         }
@@ -186,6 +213,21 @@ bool Yolo::executeContext()
     bool ok = context_ptr_->execute(1, buffer_ptr_->getDeviceBindings().data());
     if (!ok) {
         sample::LOG_ERROR() << "do inference failed." << std::endl;
+        return false;
+    }
+    return true;
+}
+
+bool Yolo::enqueue(rtStream_t stream)
+{
+    if (context_ptr_ == nullptr || buffer_ptr_ == nullptr) {
+        sample::LOG_ERROR() << "Yolo engine has not been initialized." << std::endl;
+        return false;
+    }
+
+    bool ok = context_ptr_->enqueue(1, buffer_ptr_->getDeviceBindings().data(), stream, nullptr);
+    if (!ok) {
+        sample::LOG_ERROR() << "enqueue inference failed." << std::endl;
         return false;
     }
     return true;

@@ -17,6 +17,19 @@ struct Detection
     cv::Rect box;
 };
 
+struct LetterboxInfo
+{
+    int source_width = 0;
+    int source_height = 0;
+    int model_width = 0;
+    int model_height = 0;
+    int resized_width = 0;
+    int resized_height = 0;
+    float scale = 1.0f;
+    float pad_x = 0.0f;
+    float pad_y = 0.0f;
+};
+
 struct YoloV5Config
 {
     int input_width = 640;
