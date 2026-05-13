@@ -51,7 +51,6 @@ set(SAMPLE_NAME yolov5_demo)
 set(SAMPLE_SOURCE_FILES
     ${ROOT_DIRECTORY}/yolov5/main.cpp
     ${ROOT_DIRECTORY}/yolov5/labels.cpp
-    ${ROOT_DIRECTORY}/yolov5/postprocess.cpp
     ${ROOT_DIRECTORY}/yolov5/preprocess.cpp
     ${ROOT_DIRECTORY}/yolov5/visualize.cpp
     ${ROOT_DIRECTORY}/yolov5/yolo.cpp
@@ -62,6 +61,9 @@ set(RPP_PREPROCESS_SOURCES
     ${ROOT_DIRECTORY}/rpp_preprocess/rpp_yolo_preprocessor.cpp
     ${ROOT_DIRECTORY}/rpp_preprocess/rpp_preprocess_kernels.cu
 )
+set(RPP_POSTPROCESS_SOURCES
+    ${ROOT_DIRECTORY}/rpp_postprocess/rpp_yolo_postprocessor.cpp
+)
 set(LOGGER_SOURCES
     ${ROOT_DIRECTORY}/common/logging.cpp
 )
@@ -70,6 +72,7 @@ set(rpprt_libs RppRT nvonnxparser caffeparser urpp)
 include_directories(
     ${ROOT_DIRECTORY}/yolov5
     ${ROOT_DIRECTORY}/rpp_preprocess
+    ${ROOT_DIRECTORY}/rpp_postprocess
     ${ROOT_DIRECTORY}/common
 )
 
@@ -87,6 +90,20 @@ set_target_properties(rpp_preprocessing PROPERTIES
     BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
 )
 
+add_library(rpp_postprocessing SHARED ${RPP_POSTPROCESS_SOURCES})
+target_include_directories(rpp_postprocessing
+    PRIVATE
+    ${ROOT_DIRECTORY}/yolov5
+    ${ROOT_DIRECTORY}/rpp_postprocess
+    ${ROOT_DIRECTORY}/common
+    ${RppRT_INCLUDE_DIRS}
+)
+target_link_libraries(rpp_postprocessing ${rpprt_libs})
+set_target_properties(rpp_postprocessing PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
+)
+
 add_executable(${SAMPLE_NAME}
     ${SAMPLE_SOURCE_FILES}
     ${LOGGER_SOURCES}
@@ -94,7 +111,7 @@ add_executable(${SAMPLE_NAME}
     ${CJSON_SOURCES}
     ${RPP_PREF_SOURCES}
 )
-target_link_libraries(${SAMPLE_NAME} rpp_preprocessing ${OpenCV_LIBS} ${rpprt_libs} pthread)
+target_link_libraries(${SAMPLE_NAME} rpp_preprocessing rpp_postprocessing ${OpenCV_LIBS} ${rpprt_libs} pthread)
 
 # Copy sample image into build root (ONNX and class names are not bundled; see README).
 configure_file("${ROOT_DIRECTORY}/image/test_1.png" "${CMAKE_BINARY_DIR}/test_1.png" COPYONLY)

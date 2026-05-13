@@ -15,6 +15,8 @@ All notable changes from this point forward should be recorded in this file.
 - Added letterbox metadata for postprocess coordinate restoration.
 - Added `YOLO_PROFILE=1` performance profiling that runs one preprocess + inference pass as warmup, then reports the second pass as complete preprocessing time, inference time, and combined preprocessing + inference time.
 - Added a `Yolo::enqueue()` wrapper so profile inference can be submitted through the runtime's asynchronous execution API.
+- Added an `rpp_postprocess` dynamic library module that uses RPP `nms_pre_slice` for YOLOv5 device-output box/score slicing before host-side NMS.
+- Added reserved RPP postprocess accessors for the sliced score DDR buffer shape and address.
 
 ### Changed
 - Updated the demo detection path to use a local inference helper built on the new `Yolo` host-buffer, copy, warmup, execute, and output-buffer APIs.
@@ -23,6 +25,10 @@ All notable changes from this point forward should be recorded in this file.
 - Updated the demo pipeline to run RPP preprocessing through SRAM staging and copy the normalized result into the model input DDR buffer before inference.
 - Updated YOLO output decoding to restore boxes from letterboxed model coordinates back to source image coordinates.
 - Updated build configuration to compile RPP preprocessing as a shared library linked by `yolov5_demo`.
+- Updated the demo pipeline to require RPP postprocessing from the YOLO output DDR buffer.
+- Updated RPP postprocessing to require the reference-style RPP `addNMS` path without host NMS.
+- Updated RPP `addNMS` construction to use `input_max_out_per_class` as a runtime input binding, matching the provided reference implementation.
+- Updated RPP NMS threshold bindings to BF16 scalars, matching rpprt NMS tests and avoiding extra FLOAT-to-BF16 identity layers during engine build.
 
 ### Fixed
 - Fixed YOLO input spatial dimension parsing for NCHW bindings so `1x3x640x640` resolves to `640x640` instead of treating the channel dimension as height.

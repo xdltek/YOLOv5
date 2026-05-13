@@ -24,7 +24,7 @@ __global__ void i420_to_rgb_chw_u8_kernel(const unsigned char* y_base,
     uint32_t local_offset = threadIdx.y * blockDim.x + threadIdx.x;
     uint32_t y_offset = block_offset + local_offset;
     uint32_t row_index = blockIdx.x * blockDim.y + threadIdx.y + out_y_offset;
-    uint32_t uv_offset = (row_index / 2) * (blockDim.x / 2) + (threadIdx.x / 2);
+    uint32_t uv_offset = (row_index / 2) * (width / 2) + (threadIdx.x / 2);
 
     unsigned char Y = y_base[y_offset];
     unsigned char U = u_base[uv_offset];
@@ -45,6 +45,57 @@ __global__ void i420_to_rgb_chw_u8_kernel(const unsigned char* y_base,
     r_base[y_offset] = static_cast<unsigned char>(R);
     g_base[y_offset] = static_cast<unsigned char>(G);
     b_base[y_offset] = static_cast<unsigned char>(B);
+}
+
+__global__ void letterbox_resize_norm_i420_kernel(const unsigned char* y_base,
+                                                  const unsigned char* u_base,
+                                                  const unsigned char* v_base,
+                                                  int input_width,
+                                                  int input_height,
+                                                  float* output,
+                                                  int output_width,
+                                                  int output_height,
+                                                  int resized_width,
+                                                  int resized_height,
+                                                  int pad_left,
+                                                  int pad_top)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.z;
+
+    float scale_x = static_cast<float>(input_width) / static_cast<float>(resized_width);
+    float scale_y = static_cast<float>(input_height) / static_cast<float>(resized_height);
+    int sx = static_cast<int>((static_cast<float>(x) + 0.5f) * scale_x);
+    int sy = static_cast<int>((static_cast<float>(y) + 0.5f) * scale_y);
+    sx = rpp_min(rpp_max(sx, 0), input_width - 1);
+    sy = rpp_min(rpp_max(sy, 0), input_height - 1);
+
+    int uv_width = input_width / 2;
+    int y_offset = sy * input_width + sx;
+    int uv_offset = (sy / 2) * uv_width + (sx / 2);
+
+    unsigned char Y = y_base[y_offset];
+    unsigned char U = u_base[uv_offset];
+    unsigned char V = v_base[uv_offset];
+
+    int C = static_cast<int>(Y) - 16;
+    int D = static_cast<int>(U) - 128;
+    int E = static_cast<int>(V) - 128;
+    int C298 = 298 * C;
+    int R = (C298 + 409 * E + 128) >> 8;
+    int G = (C298 - 100 * D - 208 * E + 128) >> 8;
+    int B = (C298 + 516 * D + 128) >> 8;
+
+    R = rpp_min(rpp_max(R, 0), 255);
+    G = rpp_min(rpp_max(G, 0), 255);
+    B = rpp_min(rpp_max(B, 0), 255);
+
+    int rgb_value = rpp_select(B, G, static_cast<short>(c == 1));
+    rgb_value = rpp_select(rgb_value, R, static_cast<short>(c == 0));
+    float normalized = static_cast<float>(rgb_value) * (1.0f / 255.0f);
+    int dst_idx = c * output_width * output_height + (y + pad_top) * output_width + x + pad_left;
+    output[dst_idx] = normalized;
 }
 
 __global__ void letterbox_resize_norm_hwc_kernel(const unsigned char* input,
@@ -148,14 +199,58 @@ void launch_i420_to_rgb_chw_u8(rtStream_t stream,
         blocksPerGrid.z = 1;
         i420_to_rgb_chw_u8_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
             y_base + tail_block_offset,
-            u_base + tail_block_offset / 4,
-            v_base + tail_block_offset / 4,
+            u_base,
+            v_base,
             r_base + tail_block_offset,
             g_base + tail_block_offset,
             b_base + tail_block_offset,
             width,
             main_total_row_number);
     }
+}
+
+void launch_letterbox_resize_norm_i420_to_nchw_f32(rtStream_t stream,
+                                                   const void* yuv,
+                                                   int input_width,
+                                                   int input_height,
+                                                   float* output,
+                                                   int output_width,
+                                                   int output_height,
+                                                   int resized_width,
+                                                   int resized_height,
+                                                   float,
+                                                   float pad_x,
+                                                   float pad_y)
+{
+    int pad_left = static_cast<int>(pad_x);
+    int pad_top = static_cast<int>(pad_y);
+
+    const unsigned char* y_base = static_cast<const unsigned char*>(yuv);
+    const unsigned char* u_base = y_base + input_width * input_height;
+    const unsigned char* v_base = u_base + input_width * input_height / 4;
+
+    dim3 threadsPerBlock = {0};
+    dim3 blocksPerGrid = {0};
+    threadsPerBlock.x = resized_width;
+    threadsPerBlock.y = 1;
+    threadsPerBlock.z = 1;
+    blocksPerGrid.x = 1;
+    blocksPerGrid.y = resized_height;
+    blocksPerGrid.z = 3;
+
+    letterbox_resize_norm_i420_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
+        y_base,
+        u_base,
+        v_base,
+        input_width,
+        input_height,
+        output,
+        output_width,
+        output_height,
+        resized_width,
+        resized_height,
+        pad_left,
+        pad_top);
 }
 
 void launch_letterbox_resize_norm_hwc_u8_to_nchw_f32(rtStream_t stream,

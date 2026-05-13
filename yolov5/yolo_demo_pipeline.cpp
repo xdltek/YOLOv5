@@ -5,7 +5,7 @@
 #include "yolo_demo_pipeline.h"
 
 #include "logger.h"
-#include "postprocess.h"
+#include "rpp_yolo_postprocessor.h"
 #include "rpp_yolo_preprocessor.h"
 #include "yolo.h"
 
@@ -60,6 +60,11 @@ double profile_pass_total_ms(const ProfilePassResult& pass)
     return pass.preprocess_ms + pass.inference_ms;
 }
 
+double bytes_to_kib(size_t bytes)
+{
+    return static_cast<double>(bytes) / 1024.0;
+}
+
 bool execute_yolo(Yolo& yolo,
                   int inference_count,
                   double* warmup_ms,
@@ -110,74 +115,6 @@ bool execute_yolo(Yolo& yolo,
     }
 
     return true;
-}
-
-bool copy_model_output_to_host(Yolo& yolo, std::vector<float>& output_data, double* device_to_host_ms)
-{
-    if (device_to_host_ms != nullptr) {
-        *device_to_host_ms = 0.0;
-    }
-
-    auto d2h_start = std::chrono::high_resolution_clock::now();
-    if (!yolo.copyOutputToHost()) {
-        return false;
-    }
-    if (device_to_host_ms != nullptr) {
-        auto d2h_stop = std::chrono::high_resolution_clock::now();
-        *device_to_host_ms = std::chrono::duration<double, std::milli>(d2h_stop - d2h_start).count();
-    }
-
-    const float* output_buffer = static_cast<const float*>(yolo.getOutputHostBuffer());
-    if (output_buffer == nullptr) {
-        std::cerr << "Failed to get YOLO output host buffer." << std::endl;
-        return false;
-    }
-    output_data.assign(output_buffer, output_buffer + yolo.getOutputSize());
-    return true;
-}
-
-void log_output_stats_if_requested(const std::vector<float>& output_data,
-                                   const YoloV5Config& config,
-                                   const std::vector<std::string>& class_names)
-{
-    if (std::getenv("YOLO_DEBUG_OUTPUT") == nullptr) {
-        return;
-    }
-
-    float max_objectness = 0.0f;
-    float max_class_score = 0.0f;
-    float max_combined_score = 0.0f;
-    int objectness_candidates = 0;
-    int decoded_candidates = 0;
-
-    const float* data = output_data.data();
-    for (int i = 0; i < config.output_rows; ++i) {
-        float objectness = data[4];
-        max_objectness = std::max(max_objectness, objectness);
-        if (objectness >= config.confidence_threshold) {
-            objectness_candidates++;
-        }
-
-        float class_score = data[5];
-        for (int c = 1; c < static_cast<int>(class_names.size()); ++c) {
-            class_score = std::max(class_score, data[5 + c]);
-        }
-        max_class_score = std::max(max_class_score, class_score);
-        max_combined_score = std::max(max_combined_score, objectness * class_score);
-        if (objectness >= config.confidence_threshold && class_score > config.score_threshold) {
-            decoded_candidates++;
-        }
-
-        data += config.output_dimensions;
-    }
-
-    sample::user_visible_stream_log("YOLO output stats: rows=", config.output_rows,
-                                    ", dims=", config.output_dimensions,
-                                    ", max_objectness=", max_objectness,
-                                    ", max_class_score=", max_class_score,
-                                    ", max_obj_x_class=", max_combined_score,
-                                    ", objectness_candidates=", objectness_candidates,
-                                    ", decoded_candidates=", decoded_candidates);
 }
 
 bool run_rpp_preprocess(Yolo& yolo,
@@ -304,13 +241,25 @@ bool run_measured_profile_pass(Yolo& yolo,
 
 void log_profile_result(double host_to_device_ms,
                         const ProfilePassResult& measured_pass,
-                        double output_d2h_ms)
+                        double output_d2h_ms,
+                        const RppPostprocessProfile* postprocess_profile)
 {
-    sample::user_visible_stream_log("YOLO profile warmup: first preprocess + inference pass completed");
+    sample::user_visible_stream_log("YOLO profile warmup: preprocess + inference + postprocess warmup completed");
     sample::user_visible_stream_log("YOLO profile measured: preprocess=", measured_pass.preprocess_ms,
                                     " ms, inference=", measured_pass.inference_ms,
                                     " ms, preprocess_inference_total=", profile_pass_total_ms(measured_pass),
                                     " ms");
+    if (postprocess_profile != nullptr) {
+        sample::user_visible_stream_log("YOLO profile postprocess: path=rpp, cast=", postprocess_profile->cast_ms,
+                                        " ms, nms_slice=", postprocess_profile->nms_slice_ms,
+                                        " ms, nms=", postprocess_profile->nms_ms,
+                                        " ms, compact=", postprocess_profile->compact_ms,
+                                        " ms, D2H=", postprocess_profile->device_to_host_ms,
+                                        " ms, D2H_bytes=", postprocess_profile->device_to_host_bytes,
+                                        " (", bytes_to_kib(postprocess_profile->device_to_host_bytes), " KiB)",
+                                        ", total=", postprocess_profile->total_ms,
+                                        " ms");
+    }
     sample::user_visible_stream_log("YOLO profile IO: H2D=", host_to_device_ms,
                                     " ms, D2H=", output_d2h_ms,
                                     " ms");
@@ -366,69 +315,90 @@ bool run_profile_detection(Yolo& yolo,
                            const std::vector<std::string>& class_names,
                            std::vector<Detection>& detections)
 {
-    RppYoloPreprocessor preprocessor;
-    if (!preprocessor.init(input.width, input.height, yolo.getInputWidth(), yolo.getInputHeight())) {
-        return false;
-    }
-
-    PreprocessInput device_input;
     double host_to_device_ms = 0.0;
-    if (!copy_input_to_profile_device(preprocessor, input, device_input, host_to_device_ms)) {
-        return false;
-    }
-
-    rtStream_t inference_stream = nullptr;
-    if (rtStreamCreate(&inference_stream) != rtError_t::rtSuccess) {
-        std::cerr << "Failed to create profile inference stream." << std::endl;
-        return false;
-    }
-
-    LetterboxInfo first_letterbox;
-    if (!run_profile_warmup_pass(yolo,
-                                 preprocessor,
-                                 device_input,
-                                 inference_stream,
-                                 first_letterbox)) {
-        rtStreamDestroy(inference_stream);
-        return false;
-    }
-
     LetterboxInfo second_letterbox;
     ProfilePassResult measured_pass;
-    if (!run_measured_profile_pass(yolo,
-                                   preprocessor,
-                                   device_input,
-                                   inference_count,
-                                   inference_stream,
-                                   second_letterbox,
-                                   measured_pass)) {
+    {
+        RppYoloPreprocessor preprocessor;
+        if (!preprocessor.init(input.width, input.height, yolo.getInputWidth(), yolo.getInputHeight())) {
+            return false;
+        }
+
+        PreprocessInput device_input;
+        if (!copy_input_to_profile_device(preprocessor, input, device_input, host_to_device_ms)) {
+            return false;
+        }
+
+        rtStream_t inference_stream = nullptr;
+        if (rtStreamCreate(&inference_stream) != rtError_t::rtSuccess) {
+            std::cerr << "Failed to create profile inference stream." << std::endl;
+            return false;
+        }
+
+        LetterboxInfo first_letterbox;
+        if (!run_profile_warmup_pass(yolo,
+                                     preprocessor,
+                                     device_input,
+                                     inference_stream,
+                                     first_letterbox)) {
+            rtStreamDestroy(inference_stream);
+            return false;
+        }
+
+        if (!run_measured_profile_pass(yolo,
+                                       preprocessor,
+                                       device_input,
+                                       inference_count,
+                                       inference_stream,
+                                       second_letterbox,
+                                       measured_pass)) {
+            rtStreamDestroy(inference_stream);
+            return false;
+        }
         rtStreamDestroy(inference_stream);
-        return false;
     }
-    rtStreamDestroy(inference_stream);
     log_model_input_stats_if_requested(yolo, second_letterbox);
 
-    std::vector<float> output_data;
-    double output_d2h_ms = 0.0;
-    if (!copy_model_output_to_host(yolo, output_data, &output_d2h_ms)) {
-        return false;
+    RppYoloPostprocessConfig postprocess_config;
+    postprocess_config.output_rows = config.output_rows;
+    postprocess_config.output_dimensions = config.output_dimensions;
+    postprocess_config.class_count = static_cast<int>(class_names.size());
+    postprocess_config.confidence_threshold = config.confidence_threshold;
+    postprocess_config.score_threshold = config.score_threshold;
+    postprocess_config.nms_threshold = config.nms_threshold;
+    postprocess_config.max_output_boxes_per_class = 200;
+    postprocess_config.agnostic = true;
+    postprocess_config.has_box_confidence = true;
+
+    RppYoloPostprocessor postprocessor;
+    RppPostprocessProfile postprocess_profile;
+    bool rpp_postprocess_ok = false;
+    try {
+        if (postprocessor.init(postprocess_config)) {
+            std::vector<Detection> postprocess_warmup_detections;
+            rpp_postprocess_ok = postprocessor.run(yolo.getOutputDeviceBuffer(),
+                                                   second_letterbox,
+                                                   postprocess_warmup_detections) &&
+                                 postprocessor.run(yolo.getOutputDeviceBuffer(),
+                                                   second_letterbox,
+                                                   detections,
+                                                   nullptr,
+                                                   &postprocess_profile);
+        }
+    }
+    catch (const std::exception& e) {
+        std::cerr << "RPP postprocess failed with exception: " << e.what() << std::endl;
+    }
+    if (rpp_postprocess_ok) {
+        log_profile_result(host_to_device_ms,
+                           measured_pass,
+                           postprocess_profile.device_to_host_ms,
+                           &postprocess_profile);
+        return true;
     }
 
-    log_profile_result(host_to_device_ms, measured_pass, output_d2h_ms);
-    log_output_stats_if_requested(output_data, config, class_names);
-
-    std::string error;
-    if (!decode_yolov5_output(output_data,
-                              second_letterbox,
-                              class_names,
-                              config,
-                              detections,
-                              &error)) {
-        std::cerr << error << std::endl;
-        return false;
-    }
-
-    return true;
+    std::cerr << "RPP postprocess failed." << std::endl;
+    return false;
 }
 
 bool run_detection(Yolo& yolo,
@@ -459,26 +429,32 @@ bool run_detection(Yolo& yolo,
         return false;
     }
 
-    std::vector<float> output_data;
-    if (!copy_model_output_to_host(yolo,
-                                   output_data,
-                                   nullptr)) {
-        return false;
-    }
-    log_output_stats_if_requested(output_data, config, class_names);
+    RppYoloPostprocessConfig postprocess_config;
+    postprocess_config.output_rows = config.output_rows;
+    postprocess_config.output_dimensions = config.output_dimensions;
+    postprocess_config.class_count = static_cast<int>(class_names.size());
+    postprocess_config.confidence_threshold = config.confidence_threshold;
+    postprocess_config.score_threshold = config.score_threshold;
+    postprocess_config.nms_threshold = config.nms_threshold;
+    postprocess_config.max_output_boxes_per_class = 200;
+    postprocess_config.agnostic = true;
+    postprocess_config.has_box_confidence = true;
 
-    std::string error;
-    if (!decode_yolov5_output(output_data,
-                              letterbox,
-                              class_names,
-                              config,
-                              detections,
-                              &error)) {
-        std::cerr << error << std::endl;
-        return false;
+    RppYoloPostprocessor postprocessor;
+    bool rpp_postprocess_ok = false;
+    try {
+        rpp_postprocess_ok = postprocessor.init(postprocess_config) &&
+                             postprocessor.run(yolo.getOutputDeviceBuffer(), letterbox, detections);
+    }
+    catch (const std::exception& e) {
+        std::cerr << "RPP postprocess failed with exception: " << e.what() << std::endl;
+    }
+    if (rpp_postprocess_ok) {
+        return true;
     }
 
-    return true;
+    std::cerr << "RPP postprocess failed." << std::endl;
+    return false;
 }
 }
 

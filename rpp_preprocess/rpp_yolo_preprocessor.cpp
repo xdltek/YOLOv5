@@ -204,26 +204,18 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
     }
 
     if (input.format == PreprocessInputFormat::YUV_I420) {
-        size_t rgb_bytes = static_cast<size_t>(input.width) * static_cast<size_t>(input.height) * 3U;
-        if (!ensureSramBuffer(&rgb_chw_sram_, &rgb_chw_sram_capacity_, rgb_bytes)) {
-            if (owns_stream) {
-                rtStreamDestroy(run_stream);
-            }
-            return false;
-        }
-        launch_i420_to_rgb_chw_u8(run_stream, input_sram_, input.width, input.height, rgb_chw_sram_);
-        launch_letterbox_resize_norm_chw_u8_to_nchw_f32(run_stream,
-                                                        rgb_chw_sram_,
-                                                        input.width,
-                                                        input.height,
-                                                        static_cast<float*>(model_input_sram_),
-                                                        model_width_,
-                                                        model_height_,
-                                                        letterbox.resized_width,
-                                                        letterbox.resized_height,
-                                                        letterbox.scale,
-                                                        letterbox.pad_x,
-                                                        letterbox.pad_y);
+        launch_letterbox_resize_norm_i420_to_nchw_f32(run_stream,
+                                                      input_sram_,
+                                                      input.width,
+                                                      input.height,
+                                                      static_cast<float*>(model_input_sram_),
+                                                      model_width_,
+                                                      model_height_,
+                                                      letterbox.resized_width,
+                                                      letterbox.resized_height,
+                                                      letterbox.scale,
+                                                      letterbox.pad_x,
+                                                      letterbox.pad_y);
     }
     else if (input.format == PreprocessInputFormat::RGB_CHW) {
         launch_letterbox_resize_norm_chw_u8_to_nchw_f32(run_stream,
@@ -368,6 +360,11 @@ bool RppYoloPreprocessor::validateInput(const PreprocessInput& input) const
     }
     if (is_yuv_format(input.format) && input.format != PreprocessInputFormat::YUV_I420) {
         std::cerr << "Unsupported YUV format. Only I420 is implemented." << std::endl;
+        return false;
+    }
+    if (input.format == PreprocessInputFormat::YUV_I420 &&
+        ((input.width % 2) != 0 || (input.height % 2) != 0)) {
+        std::cerr << "I420 input width and height must be even." << std::endl;
         return false;
     }
     if (!is_supported_format(input.format)) {
