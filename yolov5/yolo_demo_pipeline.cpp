@@ -51,8 +51,10 @@ bool profile_requested()
 
 struct ProfilePassResult
 {
+    RppPreprocessProfile preprocess;
     double preprocess_ms = 0.0;
     double inference_ms = 0.0;
+    int inference_count = 0;
 };
 
 double profile_pass_total_ms(const ProfilePassResult& pass)
@@ -147,24 +149,10 @@ bool copy_input_to_profile_device(RppYoloPreprocessor& preprocessor,
         return true;
     }
 
-    void* input_device = preprocessor.getInputDeviceBuffer(input.format, input.width, input.height);
-    if (input_device == nullptr) {
-        std::cerr << "Failed to allocate profile input device buffer." << std::endl;
-        return false;
-    }
-
-    size_t required = rpp_preprocess_input_bytes(input.format, input.width, input.height);
-    auto h2d_start = std::chrono::high_resolution_clock::now();
-    if (rtMemcpy(input_device, input.data, required, rtMemcpyHostToDevice) != rtError_t::rtSuccess) {
+    if (!preprocessor.uploadInputToDevice(input, device_input, nullptr, &host_to_device_ms)) {
         std::cerr << "Failed to copy profile input to device." << std::endl;
         return false;
     }
-    auto h2d_stop = std::chrono::high_resolution_clock::now();
-
-    host_to_device_ms = std::chrono::duration<double, std::milli>(h2d_stop - h2d_start).count();
-    device_input.data = input_device;
-    device_input.memory_type = PreprocessMemoryType::Device;
-    device_input.bytes = required;
     return true;
 }
 
@@ -222,6 +210,7 @@ bool run_measured_profile_pass(Yolo& yolo,
     if (!preprocessor.run(device_input, model_input_device, letterbox, nullptr, &preprocess_profile)) {
         return false;
     }
+    pass.preprocess = preprocess_profile;
     pass.preprocess_ms = preprocess_profile.total_ms;
 
     auto infer_start = std::chrono::high_resolution_clock::now();
@@ -236,6 +225,7 @@ bool run_measured_profile_pass(Yolo& yolo,
     }
     auto infer_stop = std::chrono::high_resolution_clock::now();
     pass.inference_ms = std::chrono::duration<double, std::milli>(infer_stop - infer_start).count();
+    pass.inference_count = inference_count;
     return true;
 }
 
@@ -244,24 +234,34 @@ void log_profile_result(double host_to_device_ms,
                         double output_d2h_ms,
                         const RppPostprocessProfile* postprocess_profile)
 {
+    double postprocess_total_ms = postprocess_profile == nullptr ? 0.0 : postprocess_profile->total_ms;
+    double total_ms = host_to_device_ms + measured_pass.preprocess_ms +
+                      measured_pass.inference_ms + postprocess_total_ms;
+
     sample::user_visible_stream_log("YOLO profile warmup: preprocess + inference + postprocess warmup completed");
-    sample::user_visible_stream_log("YOLO profile measured: preprocess=", measured_pass.preprocess_ms,
-                                    " ms, inference=", measured_pass.inference_ms,
-                                    " ms, preprocess_inference_total=", profile_pass_total_ms(measured_pass),
+    sample::user_visible_stream_log("YOLO profile preprocess: H2D=", host_to_device_ms,
+                                    " ms, clear=", measured_pass.preprocess.model_input_clear_ms,
+                                    " ms, resize_norm=", measured_pass.preprocess.resize_normalize_ms,
+                                    " ms, total=", measured_pass.preprocess_ms,
+                                    " ms");
+    sample::user_visible_stream_log("YOLO profile inference: total=", measured_pass.inference_ms,
+                                    " ms, loop_count=", measured_pass.inference_count,
+                                    ", preprocess_inference_total=", profile_pass_total_ms(measured_pass),
                                     " ms");
     if (postprocess_profile != nullptr) {
         sample::user_visible_stream_log("YOLO profile postprocess: path=rpp, cast=", postprocess_profile->cast_ms,
                                         " ms, nms_slice=", postprocess_profile->nms_slice_ms,
                                         " ms, nms=", postprocess_profile->nms_ms,
-                                        " ms, compact=", postprocess_profile->compact_ms,
                                         " ms, D2H=", postprocess_profile->device_to_host_ms,
                                         " ms, D2H_bytes=", postprocess_profile->device_to_host_bytes,
                                         " (", bytes_to_kib(postprocess_profile->device_to_host_bytes), " KiB)",
                                         ", total=", postprocess_profile->total_ms,
                                         " ms");
     }
-    sample::user_visible_stream_log("YOLO profile IO: H2D=", host_to_device_ms,
-                                    " ms, D2H=", output_d2h_ms,
+    sample::user_visible_stream_log("YOLO profile IO: input_H2D=", host_to_device_ms,
+                                    " ms, postprocess_D2H=", output_d2h_ms,
+                                    " ms");
+    sample::user_visible_stream_log("YOLO profile total: end_to_end=", total_ms,
                                     " ms");
 }
 

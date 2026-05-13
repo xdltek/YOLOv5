@@ -28,7 +28,6 @@ struct RppPostprocessProfile
     double cast_ms = 0.0;
     double nms_slice_ms = 0.0;
     double nms_ms = 0.0;
-    double compact_ms = 0.0;
     double device_to_host_ms = 0.0;
     size_t device_to_host_bytes = 0;
     double total_ms = 0.0;
@@ -61,7 +60,7 @@ private:
     bool allocateBuffers();
     bool copyConstantsToDevice();
     bool parseCompactDetections(const std::vector<int32_t>& class_ids,
-                                const std::vector<float>& boxes,
+                                const std::vector<uint16_t>& boxes,
                                 const LetterboxInfo& letterbox,
                                 std::vector<Detection>& detections) const;
     void releaseBuffers();
@@ -94,11 +93,13 @@ private:
     void* max_output_per_class_device_ = nullptr;
     void* iou_threshold_device_ = nullptr;
     void* score_threshold_device_ = nullptr;
+    void* nms_outputs_device_ = nullptr;
     void* nms_indices_device_ = nullptr;
     void* nms_count_device_ = nullptr;
-    void* compact_box_indices_device_ = nullptr;
-    void* compact_output_device_ = nullptr;
-    size_t compact_output_bytes_ = 0;
+    void* nms_outputs_host_ = nullptr;
+    void* boxes_bf16_host_ = nullptr;
+    size_t nms_outputs_bytes_ = 0;
+    size_t boxes_bf16_bytes_ = 0;
 };
 
 #endif // XDLTEK_SAMPLES_RPP_YOLO_POSTPROCESSOR_H

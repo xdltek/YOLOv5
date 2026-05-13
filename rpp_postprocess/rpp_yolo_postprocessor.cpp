@@ -113,6 +113,18 @@ bool allocate_device(void** buffer, size_t bytes, const char* name)
     return true;
 }
 
+bool allocate_host_pinned(void** buffer, size_t bytes, const char* name)
+{
+    if (bytes == 0) {
+        std::cerr << "Invalid pinned allocation size for " << name << std::endl;
+        return false;
+    }
+    if (!check_rt(rtHostAlloc(buffer, bytes, 0), name)) {
+        return false;
+    }
+    return true;
+}
+
 }
 
 RppYoloPostprocessor::~RppYoloPostprocessor()
@@ -364,24 +376,20 @@ bool RppYoloPostprocessor::allocateBuffers()
         return false;
     }
 
-    if (nms_context_ != nullptr &&
-        (!allocate_device(&iou_threshold_device_, sizeof(uint16_t), "rtMalloc NMS iou threshold") ||
-         !allocate_device(&score_threshold_device_, sizeof(uint16_t), "rtMalloc NMS score threshold") ||
-         !allocate_device(&nms_indices_device_, static_cast<size_t>(nms_indices_elements_) * sizeof(int32_t), "rtMalloc NMS indices") ||
-         !allocate_device(&nms_count_device_, static_cast<size_t>(nms_count_elements_) * sizeof(int32_t), "rtMalloc NMS count"))) {
-        return false;
-    }
-    int max_selected = nms_indices_elements_ / nms_index_tuple_size_;
     if (nms_context_ != nullptr) {
-        compact_output_bytes_ = static_cast<size_t>(max_selected) * 4U * sizeof(float);
-        if (!allocate_device(&compact_box_indices_device_,
-                             static_cast<size_t>(max_selected) * sizeof(int32_t),
-                             "rtMalloc compact NMS box indices") ||
-            !allocate_device(&compact_output_device_,
-                             compact_output_bytes_,
-                             "rtMalloc compact NMS output")) {
+        const size_t nms_indices_bytes = static_cast<size_t>(nms_indices_elements_) * sizeof(int32_t);
+        const size_t nms_count_bytes = static_cast<size_t>(nms_count_elements_) * sizeof(int32_t);
+        nms_outputs_bytes_ = nms_indices_bytes + nms_count_bytes;
+        boxes_bf16_bytes_ = boxes_elems * sizeof(uint16_t);
+        if (!allocate_device(&iou_threshold_device_, sizeof(uint16_t), "rtMalloc NMS iou threshold") ||
+            !allocate_device(&score_threshold_device_, sizeof(uint16_t), "rtMalloc NMS score threshold") ||
+            !allocate_device(&nms_outputs_device_, nms_outputs_bytes_, "rtMalloc NMS outputs") ||
+            !allocate_host_pinned(&nms_outputs_host_, nms_outputs_bytes_, "rtHostAlloc NMS outputs") ||
+            !allocate_host_pinned(&boxes_bf16_host_, boxes_bf16_bytes_, "rtHostAlloc NMS boxes")) {
             return false;
         }
+        nms_indices_device_ = nms_outputs_device_;
+        nms_count_device_ = static_cast<unsigned char*>(nms_outputs_device_) + nms_indices_bytes;
     }
     if (nms_context_ != nullptr && nms_max_output_index_ >= 0 &&
         !allocate_device(&max_output_per_class_device_, sizeof(int32_t), "rtMalloc NMS max output per class")) {
@@ -527,133 +535,85 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
     }
 
     int max_selected = nms_indices_elements_ / nms_index_tuple_size_;
-    std::vector<int32_t> count(static_cast<size_t>(nms_count_elements_));
-    const size_t count_bytes = count.size() * sizeof(int32_t);
+    const size_t nms_indices_bytes = static_cast<size_t>(nms_indices_elements_) * sizeof(int32_t);
 
     stage_start = ProfileClock::now();
-    bool copied = check_rt(rtMemcpy(count.data(),
-                                    nms_count_device_,
-                                    count_bytes,
-                                    rtMemcpyDeviceToHost),
-                           "rtMemcpy RPP NMS count D2H");
+    bool copied = check_rt(rtMemcpyAsync(nms_outputs_host_,
+                                         nms_outputs_device_,
+                                         nms_outputs_bytes_,
+                                         rtMemcpyDeviceToHost,
+                                         run_stream),
+                           "rtMemcpyAsync RPP NMS outputs D2H") &&
+                  check_rt(rtMemcpyAsync(boxes_bf16_host_,
+                                         boxes_bf16_device_,
+                                         boxes_bf16_bytes_,
+                                         rtMemcpyDeviceToHost,
+                                         run_stream),
+                           "rtMemcpyAsync RPP NMS boxes D2H") &&
+                  check_rt(rtStreamSynchronize(run_stream), "rtStreamSynchronize RPP postprocess D2H");
     if (!copied) {
         if (owns_stream) {
             rtStreamDestroy(run_stream);
         }
         return false;
     }
-    double count_d2h_ms = elapsed_ms(stage_start);
+    double d2h_ms = elapsed_ms(stage_start);
 
-    int selected_count = count.empty() ? 0 : count[0];
+    const int32_t* indices_data = reinterpret_cast<const int32_t*>(nms_outputs_host_);
+    const int32_t* count_data = reinterpret_cast<const int32_t*>(
+        static_cast<const unsigned char*>(nms_outputs_host_) + nms_indices_bytes);
+    int selected_count = nms_count_elements_ <= 0 ? 0 : count_data[0];
     selected_count = std::max(0, std::min(selected_count, max_selected));
     if (std::getenv("YOLO_DEBUG_OUTPUT") != nullptr) {
         std::cerr << "RPP postprocess selected_count=" << selected_count
                   << ", max_selected=" << max_selected << std::endl;
-        std::vector<int32_t> debug_indices(static_cast<size_t>(std::min(selected_count, 3)) *
-                                           static_cast<size_t>(nms_index_tuple_size_));
-        if (!debug_indices.empty() &&
-            rtMemcpy(debug_indices.data(),
-                     nms_indices_device_,
-                     debug_indices.size() * sizeof(int32_t),
-                     rtMemcpyDeviceToHost) == rtError_t::rtSuccess) {
+        int debug_count = std::min(selected_count, 3);
+        if (debug_count > 0) {
             std::cerr << "RPP postprocess first indices:";
-            for (int32_t value : debug_indices) {
-                std::cerr << " " << value;
+            for (int i = 0; i < debug_count * nms_index_tuple_size_; ++i) {
+                std::cerr << " " << indices_data[i];
             }
             std::cerr << " tuple_size=" << nms_index_tuple_size_ << std::endl;
         }
     }
 
-    float* packed_boxes_device = static_cast<float*>(compact_output_device_);
-
-    size_t compact_d2h_bytes = count_bytes;
-    double compact_d2h_ms = count_d2h_ms;
+    size_t compact_d2h_bytes = nms_outputs_bytes_ + boxes_bf16_bytes_;
+    double compact_d2h_ms = d2h_ms;
     if (selected_count > 0) {
-        stage_start = ProfileClock::now();
-        const size_t indices_bytes = static_cast<size_t>(selected_count) *
-                                     static_cast<size_t>(nms_index_tuple_size_) *
-                                     sizeof(int32_t);
-        const size_t boxes_bytes = static_cast<size_t>(selected_count) * 4U * sizeof(float);
-        std::vector<int32_t> indices(static_cast<size_t>(selected_count) *
-                                     static_cast<size_t>(nms_index_tuple_size_));
-        copied = check_rt(rtMemcpy(indices.data(),
-                                   nms_indices_device_,
-                                   indices_bytes,
-                                   rtMemcpyDeviceToHost),
-                          "rtMemcpy compact RPP NMS indices D2H");
-        if (!copied) {
-            if (owns_stream) {
-                rtStreamDestroy(run_stream);
-            }
-            return false;
-        }
-        compact_d2h_bytes += indices_bytes;
-
         std::vector<int32_t> class_ids(static_cast<size_t>(selected_count), 0);
         std::vector<int32_t> box_indices(static_cast<size_t>(selected_count), 0);
         for (int i = 0; i < selected_count; ++i) {
             size_t base = static_cast<size_t>(i) * static_cast<size_t>(nms_index_tuple_size_);
             if (nms_index_tuple_size_ == 3) {
-                class_ids[static_cast<size_t>(i)] = indices[base + 1U];
-                box_indices[static_cast<size_t>(i)] = indices[base + 2U];
+                class_ids[static_cast<size_t>(i)] = indices_data[base + 1U];
+                box_indices[static_cast<size_t>(i)] = indices_data[base + 2U];
             }
             else {
-                class_ids[static_cast<size_t>(i)] = indices[base];
-                box_indices[static_cast<size_t>(i)] = indices[base + 1U];
+                class_ids[static_cast<size_t>(i)] = indices_data[base];
+                box_indices[static_cast<size_t>(i)] = indices_data[base + 1U];
             }
         }
 
-        const size_t yolo_output_elems = static_cast<size_t>(config_.output_rows) *
-                                         static_cast<size_t>(config_.output_dimensions);
-        const size_t yolo_output_bytes = yolo_output_elems * sizeof(float);
-        std::vector<float> yolo_output(yolo_output_elems);
-        stage_start = ProfileClock::now();
-        copied = check_rt(rtMemcpy(yolo_output.data(),
-                                   yolo_output_device,
-                                   yolo_output_bytes,
-                                   rtMemcpyDeviceToHost),
-                          "rtMemcpy YOLO output D2H for selected RPP NMS boxes");
-        if (!copied) {
-            if (owns_stream) {
-                rtStreamDestroy(run_stream);
-            }
-            return false;
-        }
-        compact_d2h_ms += elapsed_ms(stage_start);
-        compact_d2h_bytes += yolo_output_bytes;
-
-        std::vector<float> boxes(static_cast<size_t>(selected_count) * 4U);
+        const uint16_t* boxes_host = static_cast<const uint16_t*>(boxes_bf16_host_);
+        const size_t boxes_elems = boxes_bf16_bytes_ / sizeof(uint16_t);
+        std::vector<uint16_t> boxes(static_cast<size_t>(selected_count) * 4U);
         for (int i = 0; i < selected_count; ++i) {
             size_t src_offset = static_cast<size_t>(box_indices[static_cast<size_t>(i)]) *
-                                static_cast<size_t>(config_.output_dimensions);
+                                4U;
             size_t dst_offset = static_cast<size_t>(i) * 4U;
-            boxes[dst_offset] = yolo_output[src_offset];
-            boxes[dst_offset + 1U] = yolo_output[src_offset + 1U];
-            boxes[dst_offset + 2U] = yolo_output[src_offset + 2U];
-            boxes[dst_offset + 3U] = yolo_output[src_offset + 3U];
+            if (src_offset + 3U >= boxes_elems) {
+                continue;
+            }
+            boxes[dst_offset] = boxes_host[src_offset];
+            boxes[dst_offset + 1U] = boxes_host[src_offset + 1U];
+            boxes[dst_offset + 2U] = boxes_host[src_offset + 2U];
+            boxes[dst_offset + 3U] = boxes_host[src_offset + 3U];
         }
         if (std::getenv("YOLO_DEBUG_OUTPUT") != nullptr && !class_ids.empty() && boxes.size() >= 4U) {
-            int debug_box_index = nms_index_tuple_size_ == 3 ? indices[2] : indices[1];
-            std::vector<float> debug_float_row(4);
-            std::vector<uint16_t> debug_bf16_row(4);
-            rtMemcpy(debug_float_row.data(),
-                     static_cast<const float*>(yolo_output_device) +
-                         static_cast<size_t>(debug_box_index) * static_cast<size_t>(config_.output_dimensions),
-                     debug_float_row.size() * sizeof(float),
-                     rtMemcpyDeviceToHost);
-            rtMemcpy(debug_bf16_row.data(),
-                     static_cast<const uint16_t*>(yolo_output_device) +
-                         static_cast<size_t>(debug_box_index) * static_cast<size_t>(config_.output_dimensions),
-                     debug_bf16_row.size() * sizeof(uint16_t),
-                     rtMemcpyDeviceToHost);
             std::cerr << "RPP postprocess first packed class=" << class_ids[0]
-                      << ", box_float=(" << boxes[0] << "," << boxes[1] << ","
-                      << boxes[2] << "," << boxes[3] << ")"
-                      << ", raw_float=(" << debug_float_row[0] << "," << debug_float_row[1]
-                      << "," << debug_float_row[2] << "," << debug_float_row[3] << ")"
-                      << ", raw_bf16_as_float=(" << bf16_to_float(debug_bf16_row[0]) << ","
-                      << bf16_to_float(debug_bf16_row[1]) << "," << bf16_to_float(debug_bf16_row[2])
-                      << "," << bf16_to_float(debug_bf16_row[3]) << ")" << std::endl;
+                      << ", box_bf16_as_float=(" << bf16_to_float(boxes[0]) << ","
+                      << bf16_to_float(boxes[1]) << "," << bf16_to_float(boxes[2])
+                      << "," << bf16_to_float(boxes[3]) << ")" << std::endl;
         }
 
         if (!parseCompactDetections(class_ids, boxes, letterbox, detections)) {
@@ -689,7 +649,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
 }
 
 bool RppYoloPostprocessor::parseCompactDetections(const std::vector<int32_t>& class_ids,
-                                                  const std::vector<float>& boxes,
+                                                  const std::vector<uint16_t>& boxes,
                                                   const LetterboxInfo& letterbox,
                                                   std::vector<Detection>& detections) const
 {
@@ -703,10 +663,10 @@ bool RppYoloPostprocessor::parseCompactDetections(const std::vector<int32_t>& cl
         if (box_offset + 3U >= boxes.size()) {
             continue;
         }
-        float x = boxes[box_offset];
-        float y = boxes[box_offset + 1U];
-        float w = boxes[box_offset + 2U];
-        float h = boxes[box_offset + 3U];
+        float x = bf16_to_float(boxes[box_offset]);
+        float y = bf16_to_float(boxes[box_offset + 1U]);
+        float w = bf16_to_float(boxes[box_offset + 2U]);
+        float h = bf16_to_float(boxes[box_offset + 3U]);
         if (w <= 0.0f || h <= 0.0f) {
             continue;
         }
@@ -758,10 +718,7 @@ void RppYoloPostprocessor::releaseBuffers()
         &max_output_per_class_device_,
         &iou_threshold_device_,
         &score_threshold_device_,
-        &nms_indices_device_,
-        &nms_count_device_,
-        &compact_box_indices_device_,
-        &compact_output_device_,
+        &nms_outputs_device_,
     };
     for (void** buffer : buffers) {
         if (*buffer != nullptr) {
@@ -769,7 +726,20 @@ void RppYoloPostprocessor::releaseBuffers()
             *buffer = nullptr;
         }
     }
-    compact_output_bytes_ = 0;
+    void** host_buffers[] = {
+        &nms_outputs_host_,
+        &boxes_bf16_host_,
+    };
+    for (void** buffer : host_buffers) {
+        if (*buffer != nullptr) {
+            rtFreeHost(*buffer);
+            *buffer = nullptr;
+        }
+    }
+    nms_indices_device_ = nullptr;
+    nms_count_device_ = nullptr;
+    nms_outputs_bytes_ = 0;
+    boxes_bf16_bytes_ = 0;
 }
 
 void RppYoloPostprocessor::resetEngines()

@@ -36,11 +36,9 @@ struct PreprocessInput
 struct RppPreprocessProfile
 {
     double host_to_device_ms = 0.0;
-    double input_ddr_to_sram_ms = 0.0;
     double model_input_clear_ms = 0.0;
     double yuv_to_rgb_ms = 0.0;
     double resize_normalize_ms = 0.0;
-    double model_input_sram_to_ddr_ms = 0.0;
     double total_ms = 0.0;
 };
 
@@ -57,6 +55,11 @@ public:
 
     void* getInputDeviceBuffer(PreprocessInputFormat format, int width, int height);
 
+    bool uploadInputToDevice(const PreprocessInput& input,
+                             PreprocessInput& device_input,
+                             rtStream_t stream = nullptr,
+                             double* host_to_device_ms = nullptr);
+
     bool run(const PreprocessInput& input,
              void* model_input_device,
              LetterboxInfo& letterbox,
@@ -65,8 +68,9 @@ public:
 
 private:
     bool ensureDeviceBuffer(void** buffer, size_t* capacity, size_t required_bytes);
+    bool ensureHostPinnedBuffer(void** buffer, size_t* capacity, size_t required_bytes);
     bool ensureSramBuffer(void** buffer, size_t* capacity, size_t required_bytes);
-    bool copyHostInputToDevice(const PreprocessInput& input, void** device_input);
+    bool copyHostInputToDevice(const PreprocessInput& input, rtStream_t stream, void** device_input);
     bool validateInput(const PreprocessInput& input) const;
 
     int max_input_width_ = 0;
@@ -76,6 +80,8 @@ private:
 
     void* host_input_device_ = nullptr;
     size_t host_input_capacity_ = 0;
+    void* host_input_pinned_ = nullptr;
+    size_t host_input_pinned_capacity_ = 0;
     void* input_sram_ = nullptr;
     size_t input_sram_capacity_ = 0;
     void* rgb_chw_sram_ = nullptr;

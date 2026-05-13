@@ -17,6 +17,7 @@ All notable changes from this point forward should be recorded in this file.
 - Added a `Yolo::enqueue()` wrapper so profile inference can be submitted through the runtime's asynchronous execution API.
 - Added an `rpp_postprocess` dynamic library module that uses RPP `nms_pre_slice` for YOLOv5 device-output box/score slicing before host-side NMS.
 - Added reserved RPP postprocess accessors for the sliced score DDR buffer shape and address.
+- Added postprocess warmup and detailed profile timing for RPP cast, NMS slice, NMS, D2H, IO, and end-to-end stages.
 
 ### Changed
 - Updated the demo detection path to use a local inference helper built on the new `Yolo` host-buffer, copy, warmup, execute, and output-buffer APIs.
@@ -29,10 +30,15 @@ All notable changes from this point forward should be recorded in this file.
 - Updated RPP postprocessing to require the reference-style RPP `addNMS` path without host NMS.
 - Updated RPP `addNMS` construction to use `input_max_out_per_class` as a runtime input binding, matching the provided reference implementation.
 - Updated RPP NMS threshold bindings to BF16 scalars, matching rpprt NMS tests and avoiding extra FLOAT-to-BF16 identity layers during engine build.
+- Updated RGB and I420 preprocessing to use pinned host staging with `rtHostAlloc` and asynchronous H2D copies.
+- Updated RPP postprocess D2H copies to use pinned host buffers and `rtMemcpyAsync` for NMS outputs and BF16 boxes.
+- Simplified profile output to report only high-level preprocess, inference, postprocess, IO, and total timings.
 
 ### Fixed
 - Fixed YOLO input spatial dimension parsing for NCHW bindings so `1x3x640x640` resolves to `640x640` instead of treating the channel dimension as height.
 - Fixed RPP preprocessing buffer flow to use DDR-to-SRAM input staging, SRAM kernel execution, and SRAM-to-DDR model input copyback, which restores nonzero model input and detections for both RGB and I420 YUV demo paths.
+- Fixed I420 preprocessing so YUV input follows the fused RPP letterbox resize/normalize path and restores box marking on generated output images.
 
 ### Removed
 - Removed the old `Yolo::infer(cv::Mat&, int, std::vector<float>&)` convenience interface after validating the new API path.
+- Removed CPU-side YOLOv5 postprocessing fallback and device-internal SRAM/DDR transfer timing from profile output.

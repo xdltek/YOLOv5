@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <vector>
@@ -89,6 +90,10 @@ RppYoloPreprocessor::~RppYoloPreprocessor()
         rtFree(host_input_device_);
         host_input_device_ = nullptr;
     }
+    if (host_input_pinned_ != nullptr) {
+        rtFreeHost(host_input_pinned_);
+        host_input_pinned_ = nullptr;
+    }
     if (input_sram_ != nullptr) {
         rtFreeSram(input_sram_);
         input_sram_ = nullptr;
@@ -129,6 +134,48 @@ void* RppYoloPreprocessor::getInputDeviceBuffer(PreprocessInputFormat format, in
     return host_input_device_;
 }
 
+bool RppYoloPreprocessor::uploadInputToDevice(const PreprocessInput& input,
+                                              PreprocessInput& device_input,
+                                              rtStream_t stream,
+                                              double* host_to_device_ms)
+{
+    if (host_to_device_ms != nullptr) {
+        *host_to_device_ms = 0.0;
+    }
+    device_input = input;
+    if (input.memory_type == PreprocessMemoryType::Device) {
+        return true;
+    }
+    if (!validateInput(input)) {
+        return false;
+    }
+
+    rtStream_t run_stream = stream;
+    bool owns_stream = false;
+    if (run_stream == nullptr) {
+        if (!check_rt(rtStreamCreate(&run_stream), "rtStreamCreate preprocess upload")) {
+            return false;
+        }
+        owns_stream = true;
+    }
+
+    void* device_data = nullptr;
+    auto stage_start = ProfileClock::now();
+    bool ok = copyHostInputToDevice(input, run_stream, &device_data);
+    if (ok) {
+        device_input.data = device_data;
+        device_input.memory_type = PreprocessMemoryType::Device;
+        device_input.bytes = rpp_preprocess_input_bytes(input.format, input.width, input.height);
+        if (host_to_device_ms != nullptr) {
+            *host_to_device_ms = elapsed_ms(stage_start);
+        }
+    }
+    if (owns_stream) {
+        check_rt(rtStreamDestroy(run_stream), "rtStreamDestroy preprocess upload");
+    }
+    return ok;
+}
+
 bool RppYoloPreprocessor::run(const PreprocessInput& input,
                               void* model_input_device,
                               LetterboxInfo& letterbox,
@@ -151,7 +198,7 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
 
     void* device_input = nullptr;
     auto stage_start = ProfileClock::now();
-    if (!copyHostInputToDevice(input, &device_input)) {
+    if (!copyHostInputToDevice(input, run_stream, &device_input)) {
         if (owns_stream) {
             rtStreamDestroy(run_stream);
         }
@@ -189,6 +236,7 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
         }
         return false;
     }
+    stage_start = ProfileClock::now();
     if (!check_rt(rtMemset(model_input_device, 0, model_input_bytes), "rtMemset model input")) {
         if (owns_stream) {
             rtStreamDestroy(run_stream);
@@ -202,7 +250,11 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
         }
         return false;
     }
+    if (profile != nullptr) {
+        profile->model_input_clear_ms = elapsed_ms(stage_start);
+    }
 
+    stage_start = ProfileClock::now();
     if (input.format == PreprocessInputFormat::YUV_I420) {
         launch_letterbox_resize_norm_i420_to_nchw_f32(run_stream,
                                                       input_sram_,
@@ -261,6 +313,9 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
         }
         return false;
     }
+    if (profile != nullptr) {
+        profile->resize_normalize_ms = elapsed_ms(stage_start);
+    }
     if (!check_rt(rtMemcpy(model_input_device, model_input_sram_, model_input_bytes, rtMemcpySramToDevice),
                   "rtMemcpy model input SRAM to DDR")) {
         if (owns_stream) {
@@ -301,6 +356,28 @@ bool RppYoloPreprocessor::ensureDeviceBuffer(void** buffer, size_t* capacity, si
     return true;
 }
 
+bool RppYoloPreprocessor::ensureHostPinnedBuffer(void** buffer, size_t* capacity, size_t required_bytes)
+{
+    if (buffer == nullptr || capacity == nullptr || required_bytes == 0) {
+        return false;
+    }
+    if (*buffer != nullptr && *capacity >= required_bytes) {
+        return true;
+    }
+    if (*buffer != nullptr) {
+        if (!check_rt(rtFreeHost(*buffer), "rtFreeHost")) {
+            return false;
+        }
+        *buffer = nullptr;
+        *capacity = 0;
+    }
+    if (!check_rt(rtHostAlloc(buffer, required_bytes, 0), "rtHostAlloc preprocess input")) {
+        return false;
+    }
+    *capacity = required_bytes;
+    return true;
+}
+
 bool RppYoloPreprocessor::ensureSramBuffer(void** buffer, size_t* capacity, size_t required_bytes)
 {
     if (buffer == nullptr || capacity == nullptr || required_bytes == 0) {
@@ -323,7 +400,9 @@ bool RppYoloPreprocessor::ensureSramBuffer(void** buffer, size_t* capacity, size
     return true;
 }
 
-bool RppYoloPreprocessor::copyHostInputToDevice(const PreprocessInput& input, void** device_input)
+bool RppYoloPreprocessor::copyHostInputToDevice(const PreprocessInput& input,
+                                                rtStream_t stream,
+                                                void** device_input)
 {
     if (device_input == nullptr) {
         return false;
@@ -341,7 +420,17 @@ bool RppYoloPreprocessor::copyHostInputToDevice(const PreprocessInput& input, vo
     if (!ensureDeviceBuffer(&host_input_device_, &host_input_capacity_, required)) {
         return false;
     }
-    if (!check_rt(rtMemcpy(host_input_device_, input.data, required, rtMemcpyHostToDevice), "rtMemcpy H2D")) {
+    if (!ensureHostPinnedBuffer(&host_input_pinned_, &host_input_pinned_capacity_, required)) {
+        return false;
+    }
+    std::memcpy(host_input_pinned_, input.data, required);
+    if (!check_rt(rtMemcpyAsync(host_input_device_,
+                                host_input_pinned_,
+                                required,
+                                rtMemcpyHostToDevice,
+                                stream),
+                  "rtMemcpyAsync preprocess H2D") ||
+        !check_rt(rtStreamSynchronize(stream), "rtStreamSynchronize preprocess H2D")) {
         return false;
     }
     *device_input = host_input_device_;
