@@ -1,6 +1,7 @@
 #include "rpp_yolo_preprocessor.h"
 
 #include "rpp_preprocess_kernels.cuh"
+#include "yolo_perf_trace.h"
 
 #include <algorithm>
 #include <chrono>
@@ -182,6 +183,7 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
                               rtStream_t stream,
                               RppPreprocessProfile* profile)
 {
+    YOLO_PERF_SCOPE_CATE("rpp_preprocess/run", "preprocess");
     reset_profile(profile);
     if (!validateInput(input) || model_input_device == nullptr) {
         return false;
@@ -236,22 +238,8 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
         }
         return false;
     }
-    stage_start = ProfileClock::now();
-    if (!check_rt(rtMemset(model_input_device, 0, model_input_bytes), "rtMemset model input")) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
-        return false;
-    }
-    if (!check_rt(rtMemcpy(model_input_sram_, model_input_device, model_input_bytes, rtMemcpyDeviceToSram),
-                  "rtMemcpy zero model input DDR to SRAM")) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
-        return false;
-    }
     if (profile != nullptr) {
-        profile->model_input_clear_ms = elapsed_ms(stage_start);
+        profile->model_input_clear_ms = 0.0;
     }
 
     stage_start = ProfileClock::now();

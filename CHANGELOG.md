@@ -18,6 +18,8 @@ All notable changes from this point forward should be recorded in this file.
 - Added an `rpp_postprocess` dynamic library module that uses RPP `nms_pre_slice` for YOLOv5 device-output box/score slicing before host-side NMS.
 - Added reserved RPP postprocess accessors for the sliced score DDR buffer shape and address.
 - Added postprocess warmup and detailed profile timing for RPP cast, NMS slice, NMS, D2H, IO, and end-to-end stages.
+- Added optional `rpp_perf` Perfetto trace integration through `YOLO_ENABLE_RPP_PERF`, `YOLO_PROFILE`, `YOLO_TRACE`, and `YOLO_TRACE_DIR`.
+- Added RPP driver trace forwarding so `rppLogsDumpToTraceWindows` records driver/API and device-side operations into the demo trace window.
 
 ### Changed
 - Updated the demo detection path to use a local inference helper built on the new `Yolo` host-buffer, copy, warmup, execute, and output-buffer APIs.
@@ -33,6 +35,9 @@ All notable changes from this point forward should be recorded in this file.
 - Updated RGB and I420 preprocessing to use pinned host staging with `rtHostAlloc` and asynchronous H2D copies.
 - Updated RPP postprocess D2H copies to use pinned host buffers and `rtMemcpyAsync` for NMS outputs and BF16 boxes.
 - Simplified profile output to report only high-level preprocess, inference, postprocess, IO, and total timings.
+- Updated the demo, RPP preprocess, and RPP postprocess paths to emit nested trace scopes for pipeline, inference, preprocess, postprocess, and IO stages when `rpp_perf` tracing is enabled.
+- Updated `rpp_perf` instrumentation to leave device operation timing to drv_api automatic trace records instead of manually wrapping each device copy, kernel, or enqueue call.
+- Updated RPP preprocessing kernels to write the full model-input tensor, including zero-valued letterbox padding, so the separate `rtMemset` clear step is no longer needed.
 
 ### Fixed
 - Fixed YOLO input spatial dimension parsing for NCHW bindings so `1x3x640x640` resolves to `640x640` instead of treating the channel dimension as height.
@@ -42,3 +47,4 @@ All notable changes from this point forward should be recorded in this file.
 ### Removed
 - Removed the old `Yolo::infer(cv::Mat&, int, std::vector<float>&)` convenience interface after validating the new API path.
 - Removed CPU-side YOLOv5 postprocessing fallback and device-internal SRAM/DDR transfer timing from profile output.
+- Removed the preprocessing `rtMemset` model-input clear from the demo execution flow.

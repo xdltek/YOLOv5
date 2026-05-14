@@ -1,5 +1,7 @@
 #include "rpp_yolo_postprocessor.h"
 
+#include "yolo_perf_trace.h"
+
 #include <nms_pre_slice.h>
 
 #include <algorithm>
@@ -135,6 +137,7 @@ RppYoloPostprocessor::~RppYoloPostprocessor()
 
 bool RppYoloPostprocessor::init(const RppYoloPostprocessConfig& config)
 {
+    YOLO_PERF_SCOPE_CATE("rpp_postprocess/init", "postprocess");
     if (config.output_rows <= 0 || config.output_dimensions <= 5 ||
         config.class_count <= 0 || config.max_output_boxes_per_class <= 0) {
         std::cerr << "Invalid RPP YOLO postprocess dimensions." << std::endl;
@@ -180,6 +183,7 @@ bool RppYoloPostprocessor::init(const RppYoloPostprocessConfig& config)
 
 bool RppYoloPostprocessor::buildCastEngine()
 {
+    YOLO_PERF_SCOPE_CATE("rpp_postprocess/build_cast_engine", "postprocess");
     std::unique_ptr<infer1::IBuilder> builder {infer1::createInferBuilder(rpp_postprocess_logger())};
     if (builder == nullptr) {
         std::cerr << "Failed to create RPP postprocess cast builder." << std::endl;
@@ -249,6 +253,7 @@ bool RppYoloPostprocessor::buildCastEngine()
 
 bool RppYoloPostprocessor::buildNmsEngine()
 {
+    YOLO_PERF_SCOPE_CATE("rpp_postprocess/build_nms_engine", "postprocess");
     std::unique_ptr<infer1::IBuilder> builder {infer1::createInferBuilder(rpp_postprocess_logger())};
     if (builder == nullptr) {
         std::cerr << "Failed to create RPP NMS builder." << std::endl;
@@ -364,6 +369,7 @@ bool RppYoloPostprocessor::buildNmsEngine()
 
 bool RppYoloPostprocessor::allocateBuffers()
 {
+    YOLO_PERF_SCOPE_CATE("rpp_postprocess/allocate_buffers", "postprocess");
     const size_t output_elems = static_cast<size_t>(config_.output_rows) *
                                 static_cast<size_t>(config_.output_dimensions);
     const size_t boxes_elems = static_cast<size_t>(config_.output_rows) * 4U;
@@ -400,6 +406,7 @@ bool RppYoloPostprocessor::allocateBuffers()
 
 bool RppYoloPostprocessor::copyConstantsToDevice()
 {
+    YOLO_PERF_SCOPE_CATE("rpp_postprocess/copy_constants_to_device", "postprocess");
     if (nms_context_ == nullptr) {
         return true;
     }
@@ -427,6 +434,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
                                rtStream_t stream,
                                RppPostprocessProfile* profile)
 {
+    YOLO_PERF_SCOPE_CATE("rpp_postprocess/run", "postprocess");
     reset_profile(profile);
     detections.clear();
     if (!initialized_ || yolo_output_device == nullptr) {
@@ -580,6 +588,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
     size_t compact_d2h_bytes = nms_outputs_bytes_ + boxes_bf16_bytes_;
     double compact_d2h_ms = d2h_ms;
     if (selected_count > 0) {
+        YOLO_PERF_SCOPE_CATE("rpp_postprocess/parse_selected_boxes", "postprocess");
         std::vector<int32_t> class_ids(static_cast<size_t>(selected_count), 0);
         std::vector<int32_t> box_indices(static_cast<size_t>(selected_count), 0);
         for (int i = 0; i < selected_count; ++i) {

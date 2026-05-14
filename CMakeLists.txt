@@ -20,6 +20,7 @@ set(CMAKE_CUDA_ARCHITECTURES RPP)
 set(_CMAKE_CUDA_WHOLE_FLAG "-c")
 enable_language(CUDA)
 set(CMAKE_CUDA_FLAGS "-fPIC -gdwarf-4 -fno-unroll-loops -O3 -ffp-contract=off -nocudalib -nocudainc -save-temps -std=c++14")
+option(YOLO_ENABLE_RPP_PERF "Enable rpp_perf trace integration" OFF)
 
 message(STATUS "ROOT_DIRECTORY: ${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -67,6 +68,9 @@ set(RPP_POSTPROCESS_SOURCES
 set(LOGGER_SOURCES
     ${ROOT_DIRECTORY}/common/logging.cpp
 )
+set(YOLO_PERF_TRACE_SOURCES
+    ${ROOT_DIRECTORY}/common/yolo_perf_trace.cpp
+)
 set(rpprt_libs RppRT nvonnxparser caffeparser urpp)
 
 include_directories(
@@ -74,6 +78,23 @@ include_directories(
     ${ROOT_DIRECTORY}/rpp_preprocess
     ${ROOT_DIRECTORY}/rpp_postprocess
     ${ROOT_DIRECTORY}/common
+)
+
+add_library(yolo_perf_trace SHARED ${YOLO_PERF_TRACE_SOURCES})
+target_include_directories(yolo_perf_trace
+    PUBLIC
+    ${ROOT_DIRECTORY}/common
+    PRIVATE
+    ${RppRT_INCLUDE_DIRS}
+)
+if(YOLO_ENABLE_RPP_PERF)
+    target_compile_definitions(yolo_perf_trace PRIVATE YOLO_ENABLE_RPP_PERF=1)
+    target_compile_options(yolo_perf_trace PRIVATE -Wno-c99-designator)
+    target_link_libraries(yolo_perf_trace PRIVATE rpp_perf urpp pthread)
+endif()
+set_target_properties(yolo_perf_trace PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
 )
 
 add_library(rpp_preprocessing SHARED ${RPP_PREPROCESS_SOURCES})
@@ -84,7 +105,7 @@ target_include_directories(rpp_preprocessing
     ${ROOT_DIRECTORY}/common
     ${RppRT_INCLUDE_DIRS}
 )
-target_link_libraries(rpp_preprocessing ${rpprt_libs})
+target_link_libraries(rpp_preprocessing yolo_perf_trace ${rpprt_libs})
 set_target_properties(rpp_preprocessing PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
@@ -98,7 +119,7 @@ target_include_directories(rpp_postprocessing
     ${ROOT_DIRECTORY}/common
     ${RppRT_INCLUDE_DIRS}
 )
-target_link_libraries(rpp_postprocessing ${rpprt_libs})
+target_link_libraries(rpp_postprocessing yolo_perf_trace ${rpprt_libs})
 set_target_properties(rpp_postprocessing PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
@@ -111,7 +132,7 @@ add_executable(${SAMPLE_NAME}
     ${CJSON_SOURCES}
     ${RPP_PREF_SOURCES}
 )
-target_link_libraries(${SAMPLE_NAME} rpp_preprocessing rpp_postprocessing ${OpenCV_LIBS} ${rpprt_libs} pthread)
+target_link_libraries(${SAMPLE_NAME} yolo_perf_trace rpp_preprocessing rpp_postprocessing ${OpenCV_LIBS} ${rpprt_libs} pthread)
 
 # Copy sample image into build root (ONNX and class names are not bundled; see README).
 configure_file("${ROOT_DIRECTORY}/image/test_1.png" "${CMAKE_BINARY_DIR}/test_1.png" COPYONLY)

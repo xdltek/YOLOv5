@@ -8,6 +8,7 @@
 #include "rpp_yolo_postprocessor.h"
 #include "rpp_yolo_preprocessor.h"
 #include "yolo.h"
+#include "yolo_perf_trace.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -73,6 +74,7 @@ bool execute_yolo(Yolo& yolo,
                   double* inference_ms,
                   bool log_summary = true)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/inference_execute", "yolov5");
     if (warmup_ms != nullptr) {
         *warmup_ms = 0.0;
     }
@@ -82,8 +84,11 @@ bool execute_yolo(Yolo& yolo,
 
     bool needs_warmup = !yolo.isWarmupDone();
     auto warmup_start = std::chrono::high_resolution_clock::now();
-    if (!yolo.warmup()) {
-        return false;
+    {
+        YOLO_PERF_SCOPE_CATE("yolo/inference_warmup", "inference");
+        if (!yolo.warmup()) {
+            return false;
+        }
     }
     if (warmup_ms != nullptr && needs_warmup) {
         auto warmup_stop = std::chrono::high_resolution_clock::now();
@@ -92,11 +97,14 @@ bool execute_yolo(Yolo& yolo,
 
     auto infer_start = std::chrono::high_resolution_clock::now();
 
-    for (int i = 0; i < inference_count; i++)
     {
-        if (!yolo.execute())
+        YOLO_PERF_SCOPE_CATE("yolo/inference_loop", "inference");
+        for (int i = 0; i < inference_count; i++)
         {
-            throw std::runtime_error("execute failed.");
+            if (!yolo.execute())
+            {
+                throw std::runtime_error("execute failed.");
+            }
         }
     }
 
@@ -124,6 +132,7 @@ bool run_rpp_preprocess(Yolo& yolo,
                         LetterboxInfo& letterbox,
                         RppPreprocessProfile* profile)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/preprocess", "preprocess");
     void* input_device = yolo.getInputDeviceBuffer();
     if (input_device == nullptr) {
         std::cerr << "Failed to get YOLO input device buffer." << std::endl;
@@ -143,6 +152,7 @@ bool copy_input_to_profile_device(RppYoloPreprocessor& preprocessor,
                                   PreprocessInput& device_input,
                                   double& host_to_device_ms)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/profile_input_upload", "preprocess");
     host_to_device_ms = 0.0;
     device_input = input;
     if (input.memory_type == PreprocessMemoryType::Device) {
@@ -158,6 +168,7 @@ bool copy_input_to_profile_device(RppYoloPreprocessor& preprocessor,
 
 bool enqueue_profile_inference(Yolo& yolo, rtStream_t stream, double* inference_ms)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/profile_inference_enqueue", "inference");
     auto infer_start = std::chrono::high_resolution_clock::now();
     if (!yolo.enqueue(stream)) {
         return false;
@@ -179,6 +190,7 @@ bool run_profile_warmup_pass(Yolo& yolo,
                              rtStream_t inference_stream,
                              LetterboxInfo& letterbox)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/profile_warmup_pass", "yolov5");
     void* model_input_device = yolo.getInputDeviceBuffer();
     if (model_input_device == nullptr) {
         std::cerr << "Failed to get YOLO input device buffer." << std::endl;
@@ -200,6 +212,7 @@ bool run_measured_profile_pass(Yolo& yolo,
                                LetterboxInfo& letterbox,
                                ProfilePassResult& pass)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/profile_measured_pass", "yolov5");
     void* model_input_device = yolo.getInputDeviceBuffer();
     if (model_input_device == nullptr) {
         std::cerr << "Failed to get YOLO input device buffer." << std::endl;
@@ -315,6 +328,7 @@ bool run_profile_detection(Yolo& yolo,
                            const std::vector<std::string>& class_names,
                            std::vector<Detection>& detections)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/profile_detection", "yolov5");
     double host_to_device_ms = 0.0;
     LetterboxInfo second_letterbox;
     ProfilePassResult measured_pass;
@@ -376,14 +390,23 @@ bool run_profile_detection(Yolo& yolo,
     try {
         if (postprocessor.init(postprocess_config)) {
             std::vector<Detection> postprocess_warmup_detections;
-            rpp_postprocess_ok = postprocessor.run(yolo.getOutputDeviceBuffer(),
-                                                   second_letterbox,
-                                                   postprocess_warmup_detections) &&
-                                 postprocessor.run(yolo.getOutputDeviceBuffer(),
-                                                   second_letterbox,
-                                                   detections,
-                                                   nullptr,
-                                                   &postprocess_profile);
+            bool warmup_ok = false;
+            {
+                YOLO_PERF_SCOPE_CATE("yolo/postprocess_warmup", "postprocess");
+                warmup_ok = postprocessor.run(yolo.getOutputDeviceBuffer(),
+                                              second_letterbox,
+                                              postprocess_warmup_detections);
+            }
+            bool measured_ok = false;
+            if (warmup_ok) {
+                YOLO_PERF_SCOPE_CATE("yolo/postprocess_measured", "postprocess");
+                measured_ok = postprocessor.run(yolo.getOutputDeviceBuffer(),
+                                                second_letterbox,
+                                                detections,
+                                                nullptr,
+                                                &postprocess_profile);
+            }
+            rpp_postprocess_ok = warmup_ok && measured_ok;
         }
     }
     catch (const std::exception& e) {
@@ -408,6 +431,7 @@ bool run_detection(Yolo& yolo,
                    const std::vector<std::string>& class_names,
                    std::vector<Detection>& detections)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/run_detection", "yolov5");
     LetterboxInfo letterbox;
     bool profiling_enabled = profile_requested();
     if (profiling_enabled) {
@@ -443,6 +467,7 @@ bool run_detection(Yolo& yolo,
     RppYoloPostprocessor postprocessor;
     bool rpp_postprocess_ok = false;
     try {
+        YOLO_PERF_SCOPE_CATE("yolo/postprocess", "postprocess");
         rpp_postprocess_ok = postprocessor.init(postprocess_config) &&
                              postprocessor.run(yolo.getOutputDeviceBuffer(), letterbox, detections);
     }
@@ -463,11 +488,13 @@ bool detect_yolov5(const cv::Mat& image,
                    const std::vector<std::string>& class_names,
                    std::vector<Detection>& detections)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/detect_rgb", "yolov5");
     Yolo yolo(options.model_path);
     if (!yolo.init_engine()) {
         std::cerr << "Failed to initialize YOLO engine." << std::endl;
         return false;
     }
+    yolo_perf_trace_enable_driver(0);
 
     YoloV5Config runtime_config = options.config;
     if (!update_config_from_model(yolo, runtime_config)) {
@@ -494,11 +521,13 @@ bool detect_yolov5_i420(const void* yuv_data,
                         const std::vector<std::string>& class_names,
                         std::vector<Detection>& detections)
 {
+    YOLO_PERF_SCOPE_CATE("yolo/detect_i420", "yolov5");
     Yolo yolo(options.model_path);
     if (!yolo.init_engine()) {
         std::cerr << "Failed to initialize YOLO engine." << std::endl;
         return false;
     }
+    yolo_perf_trace_enable_driver(0);
 
     YoloV5Config runtime_config = options.config;
     if (!update_config_from_model(yolo, runtime_config)) {

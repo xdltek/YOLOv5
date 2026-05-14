@@ -10,6 +10,7 @@
 
 #include "labels.h"
 #include "visualize.h"
+#include "yolo_perf_trace.h"
 #include "yolo_demo_pipeline.h"
 #include "argparse/argparse.hpp"
 #include "utils.hpp"
@@ -113,6 +114,7 @@ int main(int argc, char **argv)
     }
 
     int inference_count = program.get<int>("--loop");
+    YoloPerfTraceSession trace_session("yolov5_demo");
 
     const std::vector<std::string>& class_list = coco80_class_labels();
     YoloV5PipelineOptions pipeline_options;
