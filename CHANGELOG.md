@@ -5,6 +5,10 @@ All notable changes from this point forward should be recorded in this file.
 ## [Unreleased]
 
 ### Added
+- Added a reusable `src/core/RppInferEngine` model inference wrapper that can be shared by future demos.
+- Added a reusable `src/yolov5/YoloV5Pipeline` that composes RPP preprocessing, RppRT inference, and RPP postprocessing without hidden warmup.
+- Added `src/perf/PerfTraceSession` so demos can enable rpp_perf trace capture with a `--perf` CLI option.
+- Added separate single-process RGB image and I420 YUV image demos under `demos/`.
 - Added reusable `Yolo` runtime APIs for host/device input and output buffers, execution context access, device bindings access, explicit warmup, and direct execution.
 - Added one-time warmup tracking so `execute()` performs warmup automatically on the first call while still allowing callers to invoke `warmup()` explicitly.
 - Added dedicated YOLOv5 modules for shared detection types, labels, preprocessing, postprocessing, visualization, and the demo pipeline.
@@ -22,6 +26,12 @@ All notable changes from this point forward should be recorded in this file.
 - Added RPP driver trace forwarding so `rppLogsDumpToTraceWindows` records driver/API and device-side operations into the demo trace window.
 
 ### Changed
+- Reorganized the C++ code under `src/core`, `src/perf`, `src/utils`, and `src/yolov5` while keeping RPP kernel modules at the repository root.
+- Updated demo timing policy so each demo performs `init -> warmup run -> measured run` explicitly and prints customer-facing preprocess, inference, postprocess, end-to-end, and FPS metrics.
+- Updated demo logs to print model/input paths first, then a final execution-flow summary with input H2D, preprocess, inference, postprocess, output D2H, end-to-end time, FPS, and output path.
+- Updated demo H2D/D2H timing lines to include transferred byte counts.
+- Updated the build to produce `yolov5_rgb_image_demo` and `yolov5_yuv_image_demo` instead of the previous mixed-input `yolov5_demo` target.
+- Updated the preprocessor lifecycle to release SRAM buffers after each preprocessing stage so postprocessing can allocate its RPP NMS SRAM workspace.
 - Updated the demo detection path to use a local inference helper built on the new `Yolo` host-buffer, copy, warmup, execute, and output-buffer APIs.
 - Reduced `main.cpp` to CLI parsing, path validation, image loading, pipeline invocation, visualization, and output saving.
 - Removed preprocessing/postprocessing selection fields from the demo configuration.
@@ -45,6 +55,7 @@ All notable changes from this point forward should be recorded in this file.
 - Fixed I420 preprocessing so YUV input follows the fused RPP letterbox resize/normalize path and restores box marking on generated output images.
 
 ### Removed
+- Removed the old mixed-input `yolov5/main.cpp` demo entry.
 - Removed the old `Yolo::infer(cv::Mat&, int, std::vector<float>&)` convenience interface after validating the new API path.
 - Removed CPU-side YOLOv5 postprocessing fallback and device-internal SRAM/DDR transfer timing from profile output.
 - Removed the preprocessing `rtMemset` model-input clear from the demo execution flow.

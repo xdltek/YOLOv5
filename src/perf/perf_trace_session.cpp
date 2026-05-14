@@ -1,6 +1,5 @@
-#include "yolo_perf_trace.h"
+#include "perf_trace_session.h"
 
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -16,38 +15,24 @@ namespace
 uint32_t g_trace_window = 0;
 bool g_trace_started = false;
 bool g_driver_trace_enabled = false;
-
-bool trace_requested()
-{
-    return std::getenv("YOLO_TRACE") != nullptr || std::getenv("YOLO_PROFILE") != nullptr;
-}
-
-std::string trace_dir()
-{
-    const char* configured_dir = std::getenv("YOLO_TRACE_DIR");
-    if (configured_dir != nullptr && configured_dir[0] != '\0') {
-        return configured_dir;
-    }
-    return "trace";
-}
 #endif
 }
 
-bool yolo_perf_trace_start_if_requested(const char* prefix)
+bool perf_trace_start(const char* prefix, bool enabled, const char* output_dir)
 {
 #ifdef YOLO_ENABLE_RPP_PERF
     if (g_trace_started) {
         return true;
     }
-    if (!trace_requested()) {
+    if (!enabled) {
         return false;
     }
 
-    std::string dir = trace_dir();
+    std::string dir = (output_dir == nullptr || output_dir[0] == '\0') ? "trace" : output_dir;
     std::error_code error;
     std::filesystem::create_directories(dir, error);
     if (error) {
-        std::cerr << "Failed to create YOLO trace directory: " << dir
+        std::cerr << "Failed to create rpp_perf trace directory: " << dir
                   << ", error=" << error.message() << std::endl;
         return false;
     }
@@ -62,16 +47,18 @@ bool yolo_perf_trace_start_if_requested(const char* prefix)
     g_trace_started = true;
     const char* path = rpp_perf_win_path(g_trace_window);
     if (path != nullptr) {
-        std::cout << "YOLO rpp_perf trace: " << path << std::endl;
+        std::cout << "rpp_perf trace: " << path << std::endl;
     }
     return true;
 #else
     (void)prefix;
+    (void)enabled;
+    (void)output_dir;
     return false;
 #endif
 }
 
-bool yolo_perf_trace_enable_driver(unsigned int mode)
+bool perf_trace_enable_driver(unsigned int mode)
 {
 #ifdef YOLO_ENABLE_RPP_PERF
     if (!g_trace_started || g_trace_window == 0) {
@@ -96,7 +83,7 @@ bool yolo_perf_trace_enable_driver(unsigned int mode)
 #endif
 }
 
-void yolo_perf_trace_disable_driver()
+void perf_trace_disable_driver()
 {
 #ifdef YOLO_ENABLE_RPP_PERF
     if (!g_driver_trace_enabled) {
@@ -111,20 +98,20 @@ void yolo_perf_trace_disable_driver()
 #endif
 }
 
-void yolo_perf_trace_shutdown()
+void perf_trace_shutdown()
 {
 #ifdef YOLO_ENABLE_RPP_PERF
     if (!g_trace_started) {
         return;
     }
-    yolo_perf_trace_disable_driver();
+    perf_trace_disable_driver();
     TRACE_END_ALL();
     g_trace_started = false;
     g_trace_window = 0;
 #endif
 }
 
-bool yolo_perf_trace_enabled()
+bool perf_trace_enabled()
 {
 #ifdef YOLO_ENABLE_RPP_PERF
     return g_trace_started && _rpp_perf_enabled(g_trace_window);
@@ -133,10 +120,10 @@ bool yolo_perf_trace_enabled()
 #endif
 }
 
-void yolo_perf_trace_begin(const char* name, const char* category)
+void perf_trace_begin(const char* name, const char* category)
 {
 #ifdef YOLO_ENABLE_RPP_PERF
-    if (yolo_perf_trace_enabled()) {
+    if (perf_trace_enabled()) {
         TRACE_FUNC_CATE(name, category == nullptr ? "yolov5" : category);
     }
 #else
@@ -145,14 +132,19 @@ void yolo_perf_trace_begin(const char* name, const char* category)
 #endif
 }
 
-void yolo_perf_trace_end(const char* name, const char* category)
+void perf_trace_end(const char* name, const char* category)
 {
 #ifdef YOLO_ENABLE_RPP_PERF
-    if (yolo_perf_trace_enabled()) {
+    if (perf_trace_enabled()) {
         TRACE_FUNC_END_CATE(name, category == nullptr ? "yolov5" : category);
     }
 #else
     (void)name;
     (void)category;
 #endif
+}
+
+bool PerfTraceSession::enableDriverTrace(unsigned int mode) const
+{
+    return active_ && perf_trace_enable_driver(mode);
 }

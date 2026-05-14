@@ -1,9 +1,9 @@
 /**
- * @file yolo.h
- * @brief YOLOv5 inference wrapper declaration.
+ * @file rpp_infer_engine.h
+ * @brief Reusable RppRT inference engine wrapper.
  */
-#ifndef XDLTEK_SAMPLES_YOLO_H
-#define XDLTEK_SAMPLES_YOLO_H
+#ifndef XDLTEK_SAMPLES_RPP_INFER_ENGINE_H
+#define XDLTEK_SAMPLES_RPP_INFER_ENGINE_H
 
 #include "rpp_buffer_manager.h"
 
@@ -12,18 +12,13 @@
 #include <string>
 #include <vector>
 
-
-class Yolo {
+class RppInferEngine
+{
 public:
-    explicit Yolo(const std::string& onnx_path)
+    explicit RppInferEngine(const std::string& onnx_path)
         : onnx_model_path_(onnx_path) {}
 
-    /**
-     * @brief Build and initialize the inference engine from the ONNX model.
-     * @return True when engine and buffers are initialized successfully.
-     */
-    bool init_engine();
-    // virtual ~Yolo();
+    bool init();
 
     int getInputWidth() const { return input_width_; }
     int getInputHeight() const { return input_height_; }
@@ -50,13 +45,10 @@ public:
 
     bool copyInputToDevice();
     bool copyOutputToHost();
-    bool warmup();
     bool execute();
     bool enqueue(rtStream_t stream);
-    bool isWarmupDone() const { return warmup_done_; }
 
 private:
-    //void preprocess(cv::Mat& image);
     bool executeContext();
 
     std::shared_ptr<infer1::IEngine> engine_ptr_ {nullptr};
@@ -77,9 +69,6 @@ private:
     infer1::Dims output_dimensions_;
     infer1::DataType input_data_type_ {infer1::DataType::kFLOAT};
     infer1::DataType output_data_type_ {infer1::DataType::kFLOAT};
-    bool warmup_done_ = false;
-
 };
 
-
-#endif //XDLTEK_SAMPLES_YOLO_H
+#endif // XDLTEK_SAMPLES_RPP_INFER_ENGINE_H

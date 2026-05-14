@@ -36,6 +36,7 @@ struct PreprocessInput
 struct RppPreprocessProfile
 {
     double host_to_device_ms = 0.0;
+    size_t host_to_device_bytes = 0;
     double model_input_clear_ms = 0.0;
     double yuv_to_rgb_ms = 0.0;
     double resize_normalize_ms = 0.0;
@@ -65,6 +66,8 @@ public:
              LetterboxInfo& letterbox,
              rtStream_t stream = nullptr,
              RppPreprocessProfile* profile = nullptr);
+
+    void releaseSramBuffers();
 
 private:
     bool ensureDeviceBuffer(void** buffer, size_t* capacity, size_t required_bytes);

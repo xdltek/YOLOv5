@@ -1,7 +1,7 @@
 #include "rpp_yolo_preprocessor.h"
 
 #include "rpp_preprocess_kernels.cuh"
-#include "yolo_perf_trace.h"
+#include "perf_trace_session.h"
 
 #include <algorithm>
 #include <chrono>
@@ -95,17 +95,25 @@ RppYoloPreprocessor::~RppYoloPreprocessor()
         rtFreeHost(host_input_pinned_);
         host_input_pinned_ = nullptr;
     }
+    releaseSramBuffers();
+}
+
+void RppYoloPreprocessor::releaseSramBuffers()
+{
     if (input_sram_ != nullptr) {
         rtFreeSram(input_sram_);
         input_sram_ = nullptr;
+        input_sram_capacity_ = 0;
     }
     if (rgb_chw_sram_ != nullptr) {
         rtFreeSram(rgb_chw_sram_);
         rgb_chw_sram_ = nullptr;
+        rgb_chw_sram_capacity_ = 0;
     }
     if (model_input_sram_ != nullptr) {
         rtFreeSram(model_input_sram_);
         model_input_sram_ = nullptr;
+        model_input_sram_capacity_ = 0;
     }
 }
 
@@ -183,7 +191,7 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
                               rtStream_t stream,
                               RppPreprocessProfile* profile)
 {
-    YOLO_PERF_SCOPE_CATE("rpp_preprocess/run", "preprocess");
+    PERF_SCOPE_CATE("rpp_preprocess/run", "preprocess");
     reset_profile(profile);
     if (!validateInput(input) || model_input_device == nullptr) {
         return false;
@@ -208,6 +216,9 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
     }
     if (profile != nullptr) {
         profile->host_to_device_ms = input.memory_type == PreprocessMemoryType::Host ? elapsed_ms(stage_start) : 0.0;
+        profile->host_to_device_bytes = input.memory_type == PreprocessMemoryType::Host ?
+                                        rpp_preprocess_input_bytes(input.format, input.width, input.height) :
+                                        0U;
     }
     auto preprocess_start = ProfileClock::now();
 
