@@ -75,7 +75,7 @@ public:
      * @param letterbox Preprocess metadata used to restore boxes to source coordinates.
      * @param detections Output vector populated with retained detections.
      * @param stream Optional runtime stream.
-     * @param profile Optional timing profile populated for customer logs.
+     * @param profile Optional timing profile populated for demo logs.
      */
     bool run(const void* yolo_output_device,
              const LetterboxInfo& letterbox,

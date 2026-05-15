@@ -94,7 +94,7 @@ public:
      * @param model_input_device Destination model input buffer in device memory.
      * @param letterbox Output metadata needed to restore boxes after inference.
      * @param stream Optional runtime stream.
-     * @param profile Optional timing profile populated for customer logs.
+     * @param profile Optional timing profile populated for demo logs.
      */
     bool run(const PreprocessInput& input,
              void* model_input_device,

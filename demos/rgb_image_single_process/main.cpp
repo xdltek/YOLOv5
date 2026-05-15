@@ -23,7 +23,7 @@
 namespace
 {
 /**
- * @brief Convert byte counts to KiB for the customer-facing latency summary.
+ * @brief Convert byte counts to KiB for the latency summary.
  * @param bytes Number of bytes transferred.
  */
 double bytes_to_kib(size_t bytes)
@@ -39,7 +39,7 @@ double bytes_to_kib(size_t bytes)
  */
 void print_summary(const YoloV5StageTimes& times, int loop_count, const std::string& output_path)
 {
-    // FPS is derived from the customer-visible end-to-end latency after warmup.
+    // FPS is derived from the end-to-end latency measured after warmup.
     double fps = times.end_to_end_ms > 0.0 ? 1000.0 / times.end_to_end_ms : 0.0;
     std::cout << std::fixed << std::setprecision(3)
               << "\nSummary:\n"
@@ -90,7 +90,7 @@ YoloV5StageTimes average_times(const YoloV5StageTimes& total, int count)
  */
 int main(int argc, char** argv)
 {
-    // Step 1: declare the customer-facing command-line contract for this demo.
+    // Step 1: declare the command-line contract for this demo.
     argparse::ArgumentParser program("yolov5 rgb image demo", "0.1", argparse::default_arguments::help);
 
     program.add_argument("-o", "--onnx")
@@ -118,7 +118,7 @@ int main(int argc, char** argv)
             .default_value(false)
             .implicit_value(true);
 
-    // Step 2: normalize command-line spelling before argparse parses the customer options.
+    // Step 2: normalize command-line spelling before argparse parses the options.
     auto preprocessed_arguments = preprocess_args(argc, argv);
     std::vector<const char*> fixed_arguments;
     to_char_argument_vector(preprocessed_arguments, argv, fixed_arguments);

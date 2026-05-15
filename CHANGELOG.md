@@ -19,6 +19,8 @@ All notable changes from this point forward should be recorded in this file.
 - Added postprocess warmup and detailed profile timing for RPP cast, NMS slice, NMS, D2H, IO, and end-to-end stages.
 - Added optional `rpp_perf` Perfetto trace integration through `YOLO_ENABLE_RPP_PERF` and demo `--perf` options.
 - Added RPP driver trace forwarding so `rppLogsDumpToTraceWindows` records driver/API and device-side operations into the demo trace window.
+- Added `rpp/README.md` to document RPP runtime, preprocessing, postprocessing, data movement, timing ownership, and reuse guidance.
+- Added Chinese documentation sections to the root README, RGB demo README, YUV demo README, and RPP module README.
 
 ### Changed
 - Reorganized hardware-facing RPP code under `rpp/runtime`, `rpp/preprocess`, and `rpp/postprocess`, with YOLOv5 application code remaining under `src/yolov5`.
@@ -26,10 +28,10 @@ All notable changes from this point forward should be recorded in this file.
 - Renamed YOLOv5 visualization source files to `visualization.*` to match `libyolov5_visualization.so`.
 - Restricted CMake include directories to target-level public/private dependencies instead of sharing one project-wide include list.
 - Moved RPP driver trace enabling from the reusable YOLOv5 pipeline into the demo-owned `PerfTraceSession` flow.
-- Split customer-facing demo usage into dedicated RGB and I420 YUV README files, with the root README serving as the project overview.
+- Split demo usage into dedicated RGB and I420 YUV README files, with the root README serving as the project overview.
 - Updated the build layout to group executables under `build/bin`, shared libraries under `build/lib`, sample inputs under `build/assets`, rendered images under `build/output`, and optional traces under `build/trace`.
 - Updated demo default paths to run from `build/bin` with copied sample assets and output directories.
-- Updated demo timing policy so each demo performs `init -> warmup run -> measured run` explicitly and prints customer-facing preprocess, inference, postprocess, end-to-end, and FPS metrics.
+- Updated demo timing policy so each demo performs `init -> warmup run -> measured run` explicitly and prints preprocess, inference, postprocess, end-to-end, and FPS metrics.
 - Updated demo logs to print model/input paths first, then a final execution-flow summary with input H2D, preprocess, inference, postprocess, output D2H, end-to-end time, FPS, and output path.
 - Updated demo H2D/D2H timing lines to include transferred byte counts.
 - Updated demo summaries to print measured loop count and state that reported timings are average per measured loop after warmup.

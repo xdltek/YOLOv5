@@ -117,7 +117,7 @@ void RppYoloPreprocessor::releaseSramBuffers()
  */
 bool RppYoloPreprocessor::init(int max_input_width, int max_input_height, int model_width, int model_height)
 {
-    // Store shape limits up front so each run can validate customer input cheaply.
+    // Store shape limits up front so each run can validate input cheaply.
     if (max_input_width <= 0 || max_input_height <= 0 || model_width <= 0 || model_height <= 0) {
         std::cerr << "Invalid RPP preprocessor dimensions." << std::endl;
         return false;

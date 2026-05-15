@@ -61,7 +61,7 @@ bool RppInferEngine::init()
         return false;
     }
 
-    // Parse the customer-provided ONNX file into the runtime network definition.
+    // Parse the configured ONNX file into the runtime network definition.
     std::unique_ptr<onnxparser::IParser> parser {onnxparser::createParser(*network, sample::gLogger.getLogger())};
     if (parser == nullptr) {
         std::cerr << "Unable to parse ONNX model file: " << onnx_model_path_ << std::endl;
@@ -137,7 +137,7 @@ void* RppInferEngine::getOutputDeviceBuffer() const
  */
 bool RppInferEngine::executeContext()
 {
-    // Synchronous execution is the customer-facing inference timing region in the demos.
+    // Synchronous execution is the inference timing region reported by the demos.
     if (context_ptr_ == nullptr || buffer_ptr_ == nullptr) {
         sample::LOG_ERROR() << "RPP inference engine has not been initialized." << std::endl;
         return false;
