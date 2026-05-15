@@ -15,28 +15,45 @@
 
 namespace sample
 {
+    /**
+     * @brief Global logger instance shared by runtime builders, parsers, and demos.
+     */
     extern Logger gLogger;
+    /**
+     * @brief Cached verbose stream tied to the global logger.
+     */
     extern LogStreamConsumer gLogVerbose;
+    /**
+     * @brief Cached info stream tied to the global logger.
+     */
     extern LogStreamConsumer gLogInfo;
+    /**
+     * @brief Cached warning stream tied to the global logger.
+     */
     extern LogStreamConsumer gLogWarning;
+    /**
+     * @brief Cached error stream tied to the global logger.
+     */
     extern LogStreamConsumer gLogError;
+    /**
+     * @brief Cached fatal stream tied to the global logger.
+     */
     extern LogStreamConsumer gLogFatal;
 
+    /**
+     * @brief Update reportable severity on the global logger and cached stream consumers.
+     * @param severity Minimum severity printed by the demo logger.
+     */
     void setReportableSeverity(Logger::Severity severity);
 
-    Logger::Severity get_current_log_level();
-    void set_log_path(const std::string& log_file_path);
-
+    /**
+     * @brief Print a user-visible message through a selected runtime logger and optional file.
+     */
     void user_visible_log(LogStreamConsumer& rt_logger, const std::string& log_path, const std::string& log_text);
+    /**
+     * @brief Print a user-visible informational message to console.
+     */
     void user_visible_log(const std::string& log_text);
-
-    template <typename... Args>
-    void user_visible_stream_log(const Args&... args) {
-        std::ostringstream oss;
-        (oss << ... << args);
-        user_visible_log(oss.str());
-    }
 } // namespace sample
 
 #endif // LOGGER_H
-

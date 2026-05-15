@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -17,6 +16,9 @@ namespace
 {
 using ProfileClock = std::chrono::high_resolution_clock;
 
+/**
+ * @brief Minimal logger used while building internal postprocess runtime engines.
+ */
 class SilentLogger : public infer1::ILogger
 {
 public:
@@ -28,12 +30,19 @@ public:
     }
 };
 
+/**
+ * @brief Provide a quiet logger for small runtime engines created by postprocessing.
+ */
 SilentLogger& rpp_postprocess_logger()
 {
     static SilentLogger logger;
     return logger;
 }
 
+/**
+ * @brief Clear an optional postprocess profile before filling current-run timings.
+ * @param profile Optional profile object owned by the caller.
+ */
 void reset_profile(RppPostprocessProfile* profile)
 {
     if (profile != nullptr) {
@@ -41,11 +50,20 @@ void reset_profile(RppPostprocessProfile* profile)
     }
 }
 
+/**
+ * @brief Measure elapsed milliseconds from a saved timestamp to now.
+ * @param start Timestamp captured before a measured stage.
+ */
 double elapsed_ms(ProfileClock::time_point start)
 {
     return std::chrono::duration<double, std::milli>(ProfileClock::now() - start).count();
 }
 
+/**
+ * @brief Print a runtime API error and convert the status into a boolean.
+ * @param status Return value from an RPP runtime call.
+ * @param what Human-readable operation name for diagnostics.
+ */
 bool check_rt(rtError_t status, const char* what)
 {
     if (status == rtError_t::rtSuccess) {
@@ -55,6 +73,10 @@ bool check_rt(rtError_t status, const char* what)
     return false;
 }
 
+/**
+ * @brief Compute the element count described by an inference dimension object.
+ * @param dims Runtime tensor dimensions.
+ */
 int dims_volume(const infer1::Dims& dims)
 {
     int volume = 1;
@@ -64,16 +86,28 @@ int dims_volume(const infer1::Dims& dims)
     return volume;
 }
 
+/**
+ * @brief Return YOLO score channels after the four box coordinates.
+ * @param config Postprocess configuration.
+ */
 int score_channels(const RppYoloPostprocessConfig& config)
 {
     return config.output_dimensions - 4;
 }
 
+/**
+ * @brief Convert a host pointer value into the device-pointer integer type expected by nms_pre_slice.
+ * @param ptr Device pointer stored as a host-side address value.
+ */
 RPPdeviceptr as_rpp_deviceptr(const void* ptr)
 {
     return static_cast<RPPdeviceptr>(reinterpret_cast<std::uintptr_t>(ptr));
 }
 
+/**
+ * @brief Convert a raw BF16 value to float for host-side box restoration.
+ * @param value BF16 bits stored in the upper half of a float.
+ */
 float bf16_to_float(uint16_t value)
 {
     uint32_t bits = static_cast<uint32_t>(value) << 16;
@@ -82,6 +116,10 @@ float bf16_to_float(uint16_t value)
     return result;
 }
 
+/**
+ * @brief Convert a float threshold to BF16 for RPP NMS runtime inputs.
+ * @param value Threshold value in float.
+ */
 uint16_t float_to_bf16(float value)
 {
     uint32_t bits = 0;
@@ -89,6 +127,9 @@ uint16_t float_to_bf16(float value)
     return static_cast<uint16_t>(bits >> 16);
 }
 
+/**
+ * @brief Clip a restored box to source image bounds.
+ */
 cv::Rect clip_rect_to_image(float left, float top, float right, float bottom, int width, int height)
 {
     left = std::max(0.0f, std::min(left, static_cast<float>(width - 1)));
@@ -103,6 +144,9 @@ cv::Rect clip_rect_to_image(float left, float top, float right, float bottom, in
     return cv::Rect(x0, y0, std::max(0, x1 - x0), std::max(0, y1 - y0));
 }
 
+/**
+ * @brief Allocate device DDR memory and report failures with the buffer name.
+ */
 bool allocate_device(void** buffer, size_t bytes, const char* name)
 {
     if (bytes == 0) {
@@ -115,6 +159,9 @@ bool allocate_device(void** buffer, size_t bytes, const char* name)
     return true;
 }
 
+/**
+ * @brief Allocate pinned host memory for asynchronous postprocess D2H copies.
+ */
 bool allocate_host_pinned(void** buffer, size_t bytes, const char* name)
 {
     if (bytes == 0) {
@@ -129,15 +176,23 @@ bool allocate_host_pinned(void** buffer, size_t bytes, const char* name)
 
 }
 
+/**
+ * @brief Release all postprocess buffers and runtime engines.
+ */
 RppYoloPostprocessor::~RppYoloPostprocessor()
 {
+    // Release memory first, then destroy runtime engines and contexts.
     releaseBuffers();
     resetEngines();
 }
 
+/**
+ * @brief Validate configuration, build runtime subgraphs, and allocate postprocess buffers.
+ */
 bool RppYoloPostprocessor::init(const RppYoloPostprocessConfig& config)
 {
-    PERF_SCOPE_CATE("rpp_postprocess/init", "postprocess");
+    PERF_SCOPE_CATE("rpp_yolo_postprocess_init", "postprocess");
+    // Validate YOLO output shape and thresholds before creating runtime engines.
     if (config.output_rows <= 0 || config.output_dimensions <= 5 ||
         config.class_count <= 0 || config.max_output_boxes_per_class <= 0) {
         std::cerr << "Invalid RPP YOLO postprocess dimensions." << std::endl;
@@ -153,12 +208,14 @@ bool RppYoloPostprocessor::init(const RppYoloPostprocessConfig& config)
         return false;
     }
 
+    // Reinitialize from a clean state so a caller can rebuild for a different model shape.
     releaseBuffers();
     resetEngines();
     config_ = config;
     initialized_ = false;
 
     try {
+        // Build runtime subgraphs and allocate all persistent postprocess buffers.
         if (!buildNmsEngine() || !buildCastEngine()) {
             releaseBuffers();
             resetEngines();
@@ -181,9 +238,13 @@ bool RppYoloPostprocessor::init(const RppYoloPostprocessConfig& config)
     return true;
 }
 
+/**
+ * @brief Build the runtime network that casts YOLO FP32 output to BF16 for addNMS.
+ */
 bool RppYoloPostprocessor::buildCastEngine()
 {
-    PERF_SCOPE_CATE("rpp_postprocess/build_cast_engine", "postprocess");
+    PERF_SCOPE_CATE("rpp_yolo_postprocess_build_cast_engine", "postprocess");
+    // Build a tiny identity network that casts YOLO float output to BF16 for RPP NMS.
     std::unique_ptr<infer1::IBuilder> builder {infer1::createInferBuilder(rpp_postprocess_logger())};
     if (builder == nullptr) {
         std::cerr << "Failed to create RPP postprocess cast builder." << std::endl;
@@ -200,6 +261,7 @@ bool RppYoloPostprocessor::buildCastEngine()
         return false;
     }
 
+    // The cast engine preserves the YOLO output shape while changing the element type.
     infer1::Dims output_dims{};
     output_dims.nbDims = 2;
     output_dims.d[0] = config_.output_rows;
@@ -221,6 +283,7 @@ bool RppYoloPostprocessor::buildCastEngine()
     identity->getOutput(0)->setName("cast_output");
     network->markOutput(*identity->getOutput(0));
 
+    // Compile the cast network once and keep its execution context for every frame.
     builder->setMaxBatchSize(1);
     builder_config->setMaxWorkspaceSize(static_cast<size_t>(16) << 20);
     builder_config->setFlag(infer1::BuilderFlag::kBF16);
@@ -251,9 +314,13 @@ bool RppYoloPostprocessor::buildCastEngine()
     return true;
 }
 
+/**
+ * @brief Build the runtime addNMS network used by device-side YOLO candidate suppression.
+ */
 bool RppYoloPostprocessor::buildNmsEngine()
 {
-    PERF_SCOPE_CATE("rpp_postprocess/build_nms_engine", "postprocess");
+    PERF_SCOPE_CATE("rpp_yolo_postprocess_build_nms_engine", "postprocess");
+    // Build the RPP addNMS runtime graph around sliced boxes and class scores.
     std::unique_ptr<infer1::IBuilder> builder {infer1::createInferBuilder(rpp_postprocess_logger())};
     if (builder == nullptr) {
         std::cerr << "Failed to create RPP NMS builder." << std::endl;
@@ -270,6 +337,7 @@ bool RppYoloPostprocessor::buildNmsEngine()
         return false;
     }
 
+    // NMS consumes [rows, 4] boxes and [rows, scores] class/objectness scores.
     infer1::Dims boxes_dims{};
     boxes_dims.nbDims = 2;
     boxes_dims.d[0] = config_.output_rows;
@@ -296,6 +364,7 @@ bool RppYoloPostprocessor::buildNmsEngine()
         return false;
     }
 
+    // addNMS keeps NMS on the RPP runtime path; CPU only parses the compact result.
     infer1::INMSLayer* nms = network->addNMS(*boxes, *scores, *max_output_per_class);
     if (nms == nullptr) {
         std::cerr << "Failed to create RPP NMS layer." << std::endl;
@@ -336,6 +405,7 @@ bool RppYoloPostprocessor::buildNmsEngine()
         return false;
     }
 
+    // Cache binding indices once so the per-frame run path only fills binding arrays.
     nms_boxes_index_ = nms_engine_->getBindingIndex("input_boxes");
     nms_scores_index_ = nms_engine_->getBindingIndex("input_scores");
     nms_max_output_index_ = nms_engine_->getBindingIndex("input_max_out_per_class");
@@ -350,6 +420,7 @@ bool RppYoloPostprocessor::buildNmsEngine()
         return false;
     }
 
+    // Output tuple size depends on runtime version: class/index or batch/class/index.
     infer1::Dims indices_dims = nms_engine_->getBindingDimensions(nms_indices_index_);
     infer1::Dims count_dims = nms_engine_->getBindingDimensions(nms_count_index_);
     nms_indices_elements_ = dims_volume(indices_dims);
@@ -367,9 +438,13 @@ bool RppYoloPostprocessor::buildNmsEngine()
     return true;
 }
 
+/**
+ * @brief Allocate all persistent device and pinned host buffers required by postprocessing.
+ */
 bool RppYoloPostprocessor::allocateBuffers()
 {
-    PERF_SCOPE_CATE("rpp_postprocess/allocate_buffers", "postprocess");
+    PERF_SCOPE_CATE("rpp_yolo_postprocess_allocate_buffers", "postprocess");
+    // Allocate persistent device buffers for cast output and sliced NMS inputs.
     const size_t output_elems = static_cast<size_t>(config_.output_rows) *
                                 static_cast<size_t>(config_.output_dimensions);
     const size_t boxes_elems = static_cast<size_t>(config_.output_rows) * 4U;
@@ -383,6 +458,7 @@ bool RppYoloPostprocessor::allocateBuffers()
     }
 
     if (nms_context_ != nullptr) {
+        // Host pinned buffers receive compact NMS indices and BF16 boxes for CPU rendering.
         const size_t nms_indices_bytes = static_cast<size_t>(nms_indices_elements_) * sizeof(int32_t);
         const size_t nms_count_bytes = static_cast<size_t>(nms_count_elements_) * sizeof(int32_t);
         nms_outputs_bytes_ = nms_indices_bytes + nms_count_bytes;
@@ -404,9 +480,13 @@ bool RppYoloPostprocessor::allocateBuffers()
     return true;
 }
 
+/**
+ * @brief Copy static NMS threshold inputs to device memory once during initialization.
+ */
 bool RppYoloPostprocessor::copyConstantsToDevice()
 {
-    PERF_SCOPE_CATE("rpp_postprocess/copy_constants_to_device", "postprocess");
+    PERF_SCOPE_CATE("rpp_yolo_postprocess_copy_constants_to_device", "postprocess");
+    // Thresholds and max-output values are runtime inputs to match the reference addNMS flow.
     if (nms_context_ == nullptr) {
         return true;
     }
@@ -428,15 +508,19 @@ bool RppYoloPostprocessor::copyConstantsToDevice()
                     "rtMemcpy NMS score threshold");
 }
 
+/**
+ * @brief Execute cast, score slicing, RPP NMS, D2H copy, and compact detection parsing.
+ */
 bool RppYoloPostprocessor::run(const void* yolo_output_device,
                                const LetterboxInfo& letterbox,
                                std::vector<Detection>& detections,
                                rtStream_t stream,
                                RppPostprocessProfile* profile)
 {
-    PERF_SCOPE_CATE("rpp_postprocess/run", "postprocess");
+    PERF_SCOPE_CATE("rpp_yolo_postprocess_run", "postprocess");
     reset_profile(profile);
     detections.clear();
+    // Validate initialized state and letterbox metadata before launching device work.
     if (!initialized_ || yolo_output_device == nullptr) {
         std::cerr << "RPP YOLO postprocessor has not been initialized." << std::endl;
         return false;
@@ -447,6 +531,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
     }
 
     auto total_start = ProfileClock::now();
+    // Use the caller's stream when provided; otherwise own a short-lived stream for this run.
     rtStream_t run_stream = stream;
     bool owns_stream = false;
     if (run_stream == nullptr) {
@@ -456,6 +541,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
         owns_stream = true;
     }
 
+    // Cast model output from FP32 to BF16 because the RPP NMS path consumes BF16 buffers.
     std::vector<void*> cast_bindings(static_cast<size_t>(cast_engine_->getNbBindings()), nullptr);
     cast_bindings[static_cast<size_t>(cast_input_index_)] = const_cast<void*>(yolo_output_device);
     cast_bindings[static_cast<size_t>(cast_output_index_)] = yolo_bf16_device_;
@@ -478,6 +564,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
         profile->cast_ms = elapsed_ms(stage_start);
     }
 
+    // Slice YOLO rows into center-size boxes and score channels directly on device.
     stage_start = ProfileClock::now();
     try {
         infer1::rpp_nms_pre_slice_infer(as_rpp_deviceptr(yolo_bf16_device_),
@@ -504,6 +591,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
         profile->nms_slice_ms = elapsed_ms(stage_start);
     }
 
+    // Bind sliced boxes, scores, thresholds, and compact output buffers for addNMS.
     std::vector<void*> nms_bindings(static_cast<size_t>(nms_engine_->getNbBindings()), nullptr);
     nms_bindings[static_cast<size_t>(nms_boxes_index_)] = boxes_bf16_device_;
     nms_bindings[static_cast<size_t>(nms_scores_index_)] = scores_bf16_device_;
@@ -542,6 +630,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
         profile->nms_ms = elapsed_ms(stage_start);
     }
 
+    // Copy only the compact NMS result and the BF16 box table needed for final drawing.
     int max_selected = nms_indices_elements_ / nms_index_tuple_size_;
     const size_t nms_indices_bytes = static_cast<size_t>(nms_indices_elements_) * sizeof(int32_t);
 
@@ -567,28 +656,18 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
     }
     double d2h_ms = elapsed_ms(stage_start);
 
+    // Decode selected tuple count and clamp it to the allocated output capacity.
     const int32_t* indices_data = reinterpret_cast<const int32_t*>(nms_outputs_host_);
     const int32_t* count_data = reinterpret_cast<const int32_t*>(
         static_cast<const unsigned char*>(nms_outputs_host_) + nms_indices_bytes);
     int selected_count = nms_count_elements_ <= 0 ? 0 : count_data[0];
     selected_count = std::max(0, std::min(selected_count, max_selected));
-    if (std::getenv("YOLO_DEBUG_OUTPUT") != nullptr) {
-        std::cerr << "RPP postprocess selected_count=" << selected_count
-                  << ", max_selected=" << max_selected << std::endl;
-        int debug_count = std::min(selected_count, 3);
-        if (debug_count > 0) {
-            std::cerr << "RPP postprocess first indices:";
-            for (int i = 0; i < debug_count * nms_index_tuple_size_; ++i) {
-                std::cerr << " " << indices_data[i];
-            }
-            std::cerr << " tuple_size=" << nms_index_tuple_size_ << std::endl;
-        }
-    }
 
     size_t compact_d2h_bytes = nms_outputs_bytes_ + boxes_bf16_bytes_;
     double compact_d2h_ms = d2h_ms;
     if (selected_count > 0) {
-        PERF_SCOPE_CATE("rpp_postprocess/parse_selected_boxes", "postprocess");
+        PERF_SCOPE_CATE("rpp_yolo_postprocess_parse_selected_boxes", "postprocess");
+        // Convert runtime NMS index tuples into class IDs and row indices.
         std::vector<int32_t> class_ids(static_cast<size_t>(selected_count), 0);
         std::vector<int32_t> box_indices(static_cast<size_t>(selected_count), 0);
         for (int i = 0; i < selected_count; ++i) {
@@ -603,6 +682,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
             }
         }
 
+        // Gather only selected BF16 boxes so CPU parsing walks a compact list.
         const uint16_t* boxes_host = static_cast<const uint16_t*>(boxes_bf16_host_);
         const size_t boxes_elems = boxes_bf16_bytes_ / sizeof(uint16_t);
         std::vector<uint16_t> boxes(static_cast<size_t>(selected_count) * 4U);
@@ -618,13 +698,8 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
             boxes[dst_offset + 2U] = boxes_host[src_offset + 2U];
             boxes[dst_offset + 3U] = boxes_host[src_offset + 3U];
         }
-        if (std::getenv("YOLO_DEBUG_OUTPUT") != nullptr && !class_ids.empty() && boxes.size() >= 4U) {
-            std::cerr << "RPP postprocess first packed class=" << class_ids[0]
-                      << ", box_bf16_as_float=(" << bf16_to_float(boxes[0]) << ","
-                      << bf16_to_float(boxes[1]) << "," << bf16_to_float(boxes[2])
-                      << "," << bf16_to_float(boxes[3]) << ")" << std::endl;
-        }
 
+        // Restore compact boxes from model letterbox coordinates to source image coordinates.
         if (!parseCompactDetections(class_ids, boxes, letterbox, detections)) {
             if (owns_stream) {
                 rtStreamDestroy(run_stream);
@@ -636,17 +711,6 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
         profile->device_to_host_ms = compact_d2h_ms;
         profile->device_to_host_bytes = compact_d2h_bytes;
     }
-    if (std::getenv("YOLO_DEBUG_OUTPUT") != nullptr) {
-        std::cerr << "RPP postprocess parsed detections=" << detections.size();
-        if (!detections.empty()) {
-            const Detection& detection = detections.front();
-            std::cerr << ", first_class=" << detection.class_id
-                      << ", first_box=(" << detection.box.x << ","
-                      << detection.box.y << "," << detection.box.width
-                      << "," << detection.box.height << ")";
-        }
-        std::cerr << std::endl;
-    }
 
     if (owns_stream) {
         check_rt(rtStreamDestroy(run_stream), "rtStreamDestroy RPP postprocess");
@@ -657,11 +721,15 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
     return true;
 }
 
+/**
+ * @brief Decode compact NMS results into source-coordinate Detection objects.
+ */
 bool RppYoloPostprocessor::parseCompactDetections(const std::vector<int32_t>& class_ids,
                                                   const std::vector<uint16_t>& boxes,
                                                   const LetterboxInfo& letterbox,
                                                   std::vector<Detection>& detections) const
 {
+    // CPU work here is intentionally small: it only converts compact selected boxes for drawing.
     for (size_t i = 0; i < class_ids.size(); ++i) {
         int class_id = class_ids[i];
         if (class_id < 0 || class_id >= config_.class_count) {
@@ -682,6 +750,7 @@ bool RppYoloPostprocessor::parseCompactDetections(const std::vector<int32_t>& cl
 
         float confidence = 0.0f;
 
+        // Undo letterbox padding and scale so boxes match the original input frame.
         float left = ((x - 0.5f * w) - letterbox.pad_x) / letterbox.scale;
         float top = ((y - 0.5f * h) - letterbox.pad_y) / letterbox.scale;
         float right = ((x + 0.5f * w) - letterbox.pad_x) / letterbox.scale;
@@ -703,23 +772,12 @@ bool RppYoloPostprocessor::parseCompactDetections(const std::vector<int32_t>& cl
     return true;
 }
 
-const void* RppYoloPostprocessor::getSlicedScoresDeviceBuffer() const
-{
-    return scores_bf16_device_;
-}
-
-int RppYoloPostprocessor::getSlicedScoreRows() const
-{
-    return config_.output_rows;
-}
-
-int RppYoloPostprocessor::getSlicedScoreChannels() const
-{
-    return initialized_ ? score_channels(config_) : 0;
-}
-
+/**
+ * @brief Free postprocess-owned device and pinned host allocations.
+ */
 void RppYoloPostprocessor::releaseBuffers()
 {
+    // Device buffers are owned for the lifetime of one initialized postprocessor.
     void** buffers[] = {
         &yolo_bf16_device_,
         &boxes_bf16_device_,
@@ -735,6 +793,7 @@ void RppYoloPostprocessor::releaseBuffers()
             *buffer = nullptr;
         }
     }
+    // Pinned host buffers are used only for compact D2H postprocess results.
     void** host_buffers[] = {
         &nms_outputs_host_,
         &boxes_bf16_host_,
@@ -751,8 +810,12 @@ void RppYoloPostprocessor::releaseBuffers()
     boxes_bf16_bytes_ = 0;
 }
 
+/**
+ * @brief Destroy postprocess runtime engines, contexts, and cached binding indices.
+ */
 void RppYoloPostprocessor::resetEngines()
 {
+    // Reset contexts before engines and clear cached binding indices.
     cast_context_.reset();
     cast_engine_.reset();
     nms_context_.reset();

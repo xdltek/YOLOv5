@@ -8,11 +8,9 @@ It is intended to help unfamiliar users quickly build the project, run inference
 **Table Of Contents**
 - [Quick Start](#quick-start)
 - [Repository Layout](#repository-layout)
+- [Demo Guides](#demo-guides)
 - [Prerequisites](#prerequisites)
 - [How to Build](#how-to-build)
-- [How to Run](#how-to-run)
-- [Program Arguments](#program-arguments)
-- [Expected Output](#expected-output)
 - [Code Execution Workflow](#code-execution-workflow)
 - [Key Source Files](#key-source-files)
 - [What Customers Can Reuse](#what-customers-can-reuse)
@@ -29,34 +27,40 @@ mkdir build
 cd build
 cmake ..
 make -j8
-./yolov5_rgb_image_demo -o /path/to/your/yolov5.onnx -i ../image/test_1.png
+cd bin
+./yolov5_rgb_image_demo -o ../../onnx/yolov5s.onnx
 ```
 
 
-Successful execution should print warmup-stable stage timing and FPS, and generate `build/output_rgb.jpg`.
+Successful execution should print warmup-stable stage timing and FPS, and generate `build/output/output_rgb.jpg`.
 
 ## Repository Layout
 
 - `CMakeLists.txt`
   Root build entry. Configures shared dependencies and builds the reusable libraries and demo targets.
-- `src/core/`
-  Generic RPP/RppRT inference wrapper code, currently `RppInferEngine`.
 - `src/perf/`
-  Optional `rpp_perf` trace session wrapper used by demos through `--perf`.
+  Optional `rpp_perf` trace session wrapper used by demos through `-p` or `--perf`; it is active only when CMake is configured with `-DYOLO_ENABLE_RPP_PERF=ON`. If `--perf` is used in a non-perf build, the demo prints a warning and continues without trace capture.
 - `src/utils/`
   Logging, ONNX parse helper, runtime buffer helpers, and CLI/path utilities.
 - `src/yolov5/`
   YOLOv5-specific labels, detection types, visualization, and pipeline composition.
+- `rpp/`
+  RPP/RppRT hardware-facing modules, including runtime inference, preprocessing kernels/modules, and postprocessing.
 - `demos/`
   Customer-facing executable entries, including RGB image and I420 YUV image demos.
-- `rpp_preprocess/` and `rpp_postprocess/`
-  RPP preprocessing kernels/modules and RPP postprocessing implementation.
-- `image/`
-  Sample image copied into `build/` for quick verification (`test_1.png`).
+- `assets/`
+  Source sample image and I420 frame copied into `build/assets/` for quick verification.
 - `3rd_party/`
   `argparse` header-only library used by demo main files for CLI parsing.
 
 This repository does **not** bundle ONNX models. Class names for overlays are the embedded MS COCO 80-class list in `src/yolov5/labels.cpp` (`coco80_class_labels()`), matching standard YOLOv5 COCO pretrained ordering.
+
+## Demo Guides
+
+The root README explains the shared build and architecture. Each executable has its own customer-facing guide with its input format, command-line options, workflow, and expected output:
+
+- [RGB image single-process demo](demos/rgb_image_single_process/README.md)
+- [I420 YUV image single-process demo](demos/yuv_image_single_process/README.md)
 
 ## Prerequisites
 
@@ -86,99 +90,34 @@ make -j8
 After the build completes successfully, the executable should be available at:
 
 ```shell
-build/yolov5_rgb_image_demo
-build/yolov5_yuv_image_demo
+build/bin/yolov5_rgb_image_demo
+build/bin/yolov5_yuv_image_demo
+```
+
+Build outputs are grouped as:
+
+```text
+build/bin/      demo executables
+build/lib/      libyolov5_core.so, librpp_runtime.so, librpp_yolo_preprocess.so, librpp_yolo_postprocess.so, and helper libraries
+build/assets/   copied sample inputs
+build/output/   rendered detection images
+build/trace/    optional rpp_perf traces
 ```
 
 ## How to Run
 
-Run the demo from the `build` directory. **`--onnx` is required.**
+Run demos from `build/bin` after building the project. **`--onnx` is required** because the repository does not include a model file.
 
 ```shell
-cd build
-./yolov5_rgb_image_demo \
-  -o /path/to/your/yolov5.onnx \
-  -i ../image/test_1.png
+cd build/bin
+./yolov5_rgb_image_demo -o ../../onnx/yolov5s.onnx
+./yolov5_yuv_image_demo -o ../../onnx/yolov5s.onnx
 ```
 
-You can also pass any other image path supported by OpenCV imread.
+For full command-line options and expected output, see the per-demo guides:
 
-```shell
-cd build
-./yolov5_rgb_image_demo \
-  -o /path/to/your/yolov5.onnx \
-  -i /path/to/your/picture.jpg
-```
-
-For one-frame I420 YUV input:
-
-```shell
-cd build
-./yolov5_yuv_image_demo \
-  -o /path/to/your/yolov5.onnx \
-  --yuv /path/to/frame.i420 \
-  --yuv-width 1280 \
-  --yuv-height 720
-```
-
-## Program Arguments
-
-The demo supports the following command-line arguments:
-
-- `-o` or `--onnx` (**required**)
-  Path to the ONNX model file. The model is not included in this repository; use your ONNX export toolchain.
-- `-i` or `--image`
-  Path to the input image file for `yolov5_rgb_image_demo` (default: `test_1.png`).
-- `--yuv`, `--yuv-width`, `--yuv-height`
-  I420 input file and frame dimensions for `yolov5_yuv_image_demo`.
-- `--output`
-  Path to the rendered detection image.
-- `--perf`
-  Save a demo-specific `rpp_perf` trace JSON.
-- `--perf-dir`
-  Output directory for `--perf` traces.
-- `-v` or `--verbose`
-  Enable verbose runtime logging.
-- `--loop`
-  Repeat inference multiple times for timing measurement.
-
-Example:
-
-```shell
-cd build
-./yolov5_rgb_image_demo \
-  -o /path/to/your/yolov5.onnx \
-  -i ../image/test_1.png \
-  --loop 10 \
-  --perf
-```
-
-## Expected Output
-
-When the demo runs successfully, the terminal output should include information similar to:
-
-```text
-Model path: /path/to/your/yolov5.onnx
-Inference image path: ../image/test_1.png
-
-Summary:
-Input H2D: <milliseconds> ms, <bytes> bytes, <KiB> KiB
-Preprocess: <milliseconds> ms
-Inference: <milliseconds> ms
-Postprocess: <milliseconds> ms
-Output D2H: <milliseconds> ms, <bytes> bytes, <KiB> KiB
-All time end to end: <milliseconds> ms
-FPS: <fps>
-Output path: output_rgb.jpg
-```
-
-The final rendered detection result is written to:
-
-```text
-build/output_rgb.jpg
-```
-
-Overlay text uses the embedded COCO 80 names when `class_id` is in range; otherwise labels fall back to `class_<id>`.
+- [RGB image single-process demo](demos/rgb_image_single_process/README.md)
+- [I420 YUV image single-process demo](demos/yuv_image_single_process/README.md)
 
 ## Code Execution Workflow
 
@@ -222,12 +161,16 @@ Overlay text uses the embedded COCO 80 names when `class_id` is in range; otherw
 
 ## Key Source Files
 
-- `src/core/rpp_infer_engine.*`
+- `rpp/runtime/rpp_infer_engine.*`
   Generic RPP/RppRT runtime wrapper. Parses the ONNX model, builds the execution engine, allocates buffers, and runs inference.
+- `rpp/preprocess/rpp_yolo_preprocessor.*`
+  RPP preprocessing module and kernels for RGB/BGR/I420 inputs.
+- `rpp/postprocess/rpp_yolo_postprocessor.*`
+  RPP postprocessing module for YOLO output slicing and NMS.
 - `src/yolov5/yolo_pipeline.*`
   YOLOv5 pipeline composition. Runs RPP preprocessing, inference, and RPP postprocessing once per call without hidden warmup.
 - `src/perf/perf_trace_session.*`
-  Optional rpp_perf trace wrapper used by demos through `--perf`.
+  Optional rpp_perf trace wrapper used by demos through `-p` or `--perf`.
 - `demos/rgb_image_single_process/main.cpp`
   RGB/BGR image demo entry point.
 - `demos/yuv_image_single_process/main.cpp`
@@ -246,4 +189,4 @@ Overlay text uses the embedded COCO 80 names when `class_id` is in range; otherw
 - Point -o to any YOLOv5-compatible ONNX model produced by your pipeline.
 - If your model uses a different class ordering or dataset than COCO 80, edit `coco80_class_labels()` in `src/yolov5/labels.cpp` (or replace it with your own table).
 - Replace the sample image path with your own image source.
-- Reuse `src/core/RppInferEngine`, `src/yolov5/YoloV5Pipeline`, and the demo argument/timing pattern as the starting point for your own RPP-based inference application.
+- Reuse `rpp/runtime/RppInferEngine`, `src/yolov5/YoloV5Pipeline`, and the demo argument/timing pattern as the starting point for your own RPP-based inference application.

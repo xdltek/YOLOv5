@@ -5,4 +5,3 @@ onnx/
 *.onnx
 *.o
 *.jpg
-yuv/

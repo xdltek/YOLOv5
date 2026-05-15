@@ -10,62 +10,82 @@
 #include <cstddef>
 #include <memory>
 #include <string>
-#include <vector>
 
+/**
+ * @brief Reusable RppRT inference wrapper that owns the model engine, bindings, and context.
+ */
 class RppInferEngine
 {
 public:
+    /**
+     * @brief Store the ONNX path used during runtime engine initialization.
+     * @param onnx_path Path to a YOLO-compatible ONNX model file.
+     */
     explicit RppInferEngine(const std::string& onnx_path)
         : onnx_model_path_(onnx_path) {}
 
+    /**
+     * @brief Parse ONNX, build the RppRT engine, allocate bindings, and create execution context.
+     */
     bool init();
 
+    /**
+     * @brief Return the model input tensor width derived from the ONNX binding.
+     */
     int getInputWidth() const { return input_width_; }
+    /**
+     * @brief Return the model input tensor height derived from the ONNX binding.
+     */
     int getInputHeight() const { return input_height_; }
-    size_t getInputSize() const { return input_tensor_size_; }
+    /**
+     * @brief Return the total element count of the model output tensor.
+     */
     size_t getOutputSize() const { return output_tensor_size_; }
-    size_t getInputByteSize() const;
-    size_t getOutputByteSize() const;
 
-    const std::string& getInputName() const { return input_name_; }
-    const std::string& getOutputName() const { return output_name_; }
-    infer1::Dims getInputDimensions() const { return input_dimensions_; }
+    /**
+     * @brief Return the model output tensor dimensions.
+     */
     infer1::Dims getOutputDimensions() const { return output_dimensions_; }
+    /**
+     * @brief Return the model input tensor data type.
+     */
     infer1::DataType getInputDataType() const { return input_data_type_; }
+    /**
+     * @brief Return the model output tensor data type.
+     */
     infer1::DataType getOutputDataType() const { return output_data_type_; }
 
-    void* getInputHostBuffer() const;
-    void* getOutputHostBuffer() const;
+    /**
+     * @brief Return the device buffer bound to the model input tensor.
+     */
     void* getInputDeviceBuffer() const;
+    /**
+     * @brief Return the device buffer bound to the model output tensor.
+     */
     void* getOutputDeviceBuffer() const;
 
-    infer1::IExecutionContext* getExecutionContext() const { return context_ptr_.get(); }
-    std::vector<void*>& getDeviceBindings();
-    const std::vector<void*>& getDeviceBindings() const;
-
-    bool copyInputToDevice();
-    bool copyOutputToHost();
+    /**
+     * @brief Execute the runtime context synchronously with current device bindings.
+     */
     bool execute();
-    bool enqueue(rtStream_t stream);
 
 private:
+    /**
+     * @brief Run synchronous inference on the current execution context.
+     */
     bool executeContext();
 
     std::shared_ptr<infer1::IEngine> engine_ptr_ {nullptr};
     std::shared_ptr<samplesCommon::RppBufferManager> buffer_ptr_ {nullptr};
     std::unique_ptr<infer1::IExecutionContext> context_ptr_ {nullptr};
 
-    int input_index_ = 0;
-    int output_index_ = 0;
     int input_width_ = 0;
     int input_height_ = 0;
-    size_t input_tensor_size_ = 0;
     size_t output_tensor_size_ = 0;
     std::string onnx_model_path_;
 
     std::string input_name_;
     std::string output_name_;
-    infer1::Dims input_dimensions_;
     infer1::Dims output_dimensions_;
     infer1::DataType input_data_type_ {infer1::DataType::kFLOAT};
     infer1::DataType output_data_type_ {infer1::DataType::kFLOAT};

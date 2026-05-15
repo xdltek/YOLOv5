@@ -17,17 +17,25 @@
 
 namespace
 {
+/**
+ * @brief Fill runtime YOLOv5 tensor shape fields from the initialized inference engine.
+ * @param infer_engine Initialized RPP inference engine.
+ * @param config Pipeline configuration updated with model input and output dimensions.
+ */
 bool update_config_from_model(const RppInferEngine& infer_engine, YoloV5Config& config)
 {
+    // This pipeline currently expects the model binding format used by standard YOLOv5 ONNX exports.
     if (infer_engine.getInputDataType() != infer1::DataType::kFLOAT ||
         infer_engine.getOutputDataType() != infer1::DataType::kFLOAT) {
         std::cerr << "The current YOLOv5 path only supports float input/output tensors." << std::endl;
         return false;
     }
 
+    // Input dimensions drive RPP letterbox preprocessing.
     config.input_width = infer_engine.getInputWidth();
     config.input_height = infer_engine.getInputHeight();
 
+    // Output dimensions drive RPP addNMS configuration.
     infer1::Dims output_dims = infer_engine.getOutputDimensions();
     if (output_dims.nbDims <= 0) {
         std::cerr << "Invalid YOLO output dimensions." << std::endl;
@@ -44,6 +52,11 @@ bool update_config_from_model(const RppInferEngine& infer_engine, YoloV5Config& 
     return true;
 }
 
+/**
+ * @brief Build RPP postprocess configuration from model shape and class table size.
+ * @param config Runtime YOLOv5 pipeline configuration.
+ * @param class_count Number of supported class labels.
+ */
 RppYoloPostprocessConfig make_postprocess_config(const YoloV5Config& config, int class_count)
 {
     RppYoloPostprocessConfig postprocess_config;
@@ -59,6 +72,9 @@ RppYoloPostprocessConfig make_postprocess_config(const YoloV5Config& config, int
     return postprocess_config;
 }
 
+/**
+ * @brief Measure elapsed milliseconds between two host timestamps.
+ */
 double elapsed_ms(const std::chrono::high_resolution_clock::time_point& start,
                   const std::chrono::high_resolution_clock::time_point& stop)
 {
@@ -66,26 +82,38 @@ double elapsed_ms(const std::chrono::high_resolution_clock::time_point& start,
 }
 }
 
+/**
+ * @brief Construct an empty pipeline; call init() before running frames.
+ */
 YoloV5Pipeline::YoloV5Pipeline() = default;
+
+/**
+ * @brief Destroy module owners and release runtime resources.
+ */
 YoloV5Pipeline::~YoloV5Pipeline() = default;
 
+/**
+ * @brief Initialize model runtime, derive tensor shapes, and build postprocessing.
+ */
 bool YoloV5Pipeline::init(const YoloV5PipelineOptions& options, const std::vector<std::string>& class_names)
 {
-    PERF_SCOPE_CATE("yolov5_pipeline/init", "yolov5");
+    PERF_SCOPE_CATE("yolov5_pipeline_init", "yolov5");
+    // Store caller options so every measured run uses the same model and repeat settings.
     options_ = options;
     config_ = options.config;
 
+    // Initialize the reusable runtime wrapper before deriving tensor-dependent pipeline config.
     infer_engine_ = std::make_unique<RppInferEngine>(options.model_path);
     if (!infer_engine_->init()) {
         std::cerr << "Failed to initialize RPP inference engine." << std::endl;
         return false;
     }
-    perf_trace_enable_driver(0);
 
     if (!update_config_from_model(*infer_engine_, config_)) {
         return false;
     }
 
+    // Build the postprocessor after model output dimensions are known.
     if (!initPostprocessor(class_names)) {
         return false;
     }
@@ -94,22 +122,31 @@ bool YoloV5Pipeline::init(const YoloV5PipelineOptions& options, const std::vecto
     return true;
 }
 
+/**
+ * @brief Build the YOLOv5 postprocessor after model output dimensions are known.
+ */
 bool YoloV5Pipeline::initPostprocessor(const std::vector<std::string>& class_names)
 {
-    PERF_SCOPE_CATE("yolov5_pipeline/init_postprocess", "postprocess");
+    PERF_SCOPE_CATE("yolov5_pipeline_init_postprocess", "postprocess");
+    // The class table size defines the number of score channels consumed by NMS.
     postprocessor_ = std::make_unique<RppYoloPostprocessor>();
     return postprocessor_->init(make_postprocess_config(config_, static_cast<int>(class_names.size())));
 }
 
+/**
+ * @brief Create or reuse a preprocessor sized for the requested source image.
+ */
 bool YoloV5Pipeline::ensurePreprocessor(int width, int height)
 {
+    // Reuse the existing preprocessor while the new input fits its initialized maximum size.
     if (preprocessor_ != nullptr &&
         preprocessor_width_ >= width &&
         preprocessor_height_ >= height) {
         return true;
     }
 
-    PERF_SCOPE_CATE("yolov5_pipeline/init_preprocess", "preprocess");
+    // Rebuild only when a larger input frame requires larger staging buffers.
+    PERF_SCOPE_CATE("yolov5_pipeline_init_preprocess", "preprocess");
     preprocessor_ = std::make_unique<RppYoloPreprocessor>();
     if (!preprocessor_->init(width, height, config_.input_width, config_.input_height)) {
         preprocessor_.reset();
@@ -120,10 +157,14 @@ bool YoloV5Pipeline::ensurePreprocessor(int width, int height)
     return true;
 }
 
+/**
+ * @brief Run a host BGR OpenCV image through the complete YOLOv5 pipeline.
+ */
 bool YoloV5Pipeline::runRgb(const cv::Mat& image,
                             std::vector<Detection>& detections,
                             YoloV5StageTimes* times)
 {
+    // Convert non-contiguous OpenCV images into a compact host buffer for RPP upload.
     if (image.empty()) {
         std::cerr << "Input image is empty." << std::endl;
         return false;
@@ -142,6 +183,9 @@ bool YoloV5Pipeline::runRgb(const cv::Mat& image,
                     times);
 }
 
+/**
+ * @brief Run a host I420 frame through the complete YOLOv5 pipeline.
+ */
 bool YoloV5Pipeline::runI420(const void* yuv_data,
                              size_t yuv_bytes,
                              int width,
@@ -149,6 +193,7 @@ bool YoloV5Pipeline::runI420(const void* yuv_data,
                              std::vector<Detection>& detections,
                              YoloV5StageTimes* times)
 {
+    // I420 is already a compact single buffer: Y plane, then U plane, then V plane.
     return runInput(yuv_data,
                     yuv_bytes,
                     width,
@@ -161,6 +206,9 @@ bool YoloV5Pipeline::runI420(const void* yuv_data,
                     times);
 }
 
+/**
+ * @brief Shared input path used by RGB and YUV demos to execute one full pipeline pass.
+ */
 bool YoloV5Pipeline::runInput(const void* data,
                               size_t bytes,
                               int width,
@@ -172,7 +220,8 @@ bool YoloV5Pipeline::runInput(const void* data,
                               std::vector<Detection>& detections,
                               YoloV5StageTimes* times)
 {
-    PERF_SCOPE_CATE("yolov5_pipeline/run", "yolov5");
+    PERF_SCOPE_CATE("yolov5_pipeline_run", "yolov5");
+    // Fail early before any runtime work when initialization or input metadata is invalid.
     if (!initialized_ || infer_engine_ == nullptr || postprocessor_ == nullptr) {
         std::cerr << "YOLOv5 pipeline has not been initialized." << std::endl;
         return false;
@@ -188,14 +237,17 @@ bool YoloV5Pipeline::runInput(const void* data,
     (void)row_stride_bytes;
     (void)channels;
 
+    // Each call owns one full end-to-end pipeline measurement.
     detections.clear();
     YoloV5StageTimes local_times;
     auto e2e_start = std::chrono::high_resolution_clock::now();
 
+    // Preprocessor workspace depends on source size and model input shape.
     if (!ensurePreprocessor(width, height)) {
         return false;
     }
 
+    // Describe the host input buffer for the RPP preprocessing module.
     PreprocessInput input;
     input.data = data;
     input.width = width;
@@ -206,9 +258,10 @@ bool YoloV5Pipeline::runInput(const void* data,
 
     LetterboxInfo letterbox;
     RppPreprocessProfile preprocess_profile;
+    // Preprocess includes H2D source upload, SRAM staging, letterbox, resize, and normalize.
     auto preprocess_start = std::chrono::high_resolution_clock::now();
     {
-        PERF_SCOPE_CATE("yolov5_pipeline/preprocess", "preprocess");
+        PERF_SCOPE_CATE("yolov5_pipeline_preprocess_stage", "preprocess");
         if (!preprocessor_->run(input,
                                 infer_engine_->getInputDeviceBuffer(),
                                 letterbox,
@@ -225,9 +278,10 @@ bool YoloV5Pipeline::runInput(const void* data,
     local_times.input_h2d_ms = preprocess_profile.host_to_device_ms;
     local_times.input_h2d_bytes = preprocess_profile.host_to_device_bytes;
 
+    // Inference is defined as OpenRT/RppRT engine execution only.
     auto inference_start = std::chrono::high_resolution_clock::now();
     {
-        PERF_SCOPE_CATE("yolov5_pipeline/inference", "inference");
+        PERF_SCOPE_CATE("yolov5_pipeline_inference_stage", "inference");
         // Inference is defined as the OpenRT/RppRT ONNX engine execution time only.
         for (int i = 0; i < options_.inference_count; ++i) {
             if (!infer_engine_->execute()) {
@@ -238,10 +292,11 @@ bool YoloV5Pipeline::runInput(const void* data,
     auto inference_stop = std::chrono::high_resolution_clock::now();
     local_times.inference_ms = elapsed_ms(inference_start, inference_stop);
 
+    // Postprocess runs RPP cast/slice/NMS and copies compact results back for drawing.
     RppPostprocessProfile postprocess_profile;
     auto postprocess_start = std::chrono::high_resolution_clock::now();
     {
-        PERF_SCOPE_CATE("yolov5_pipeline/postprocess", "postprocess");
+        PERF_SCOPE_CATE("yolov5_pipeline_postprocess_stage", "postprocess");
         if (!postprocessor_->run(infer_engine_->getOutputDeviceBuffer(),
                                  letterbox,
                                  detections,

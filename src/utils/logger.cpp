@@ -22,8 +22,12 @@ namespace sample
     LogStreamConsumer gLogError{LOG_ERROR(gLogger)};
     LogStreamConsumer gLogFatal{LOG_FATAL(gLogger)};
 
+    /**
+     * @brief Update global logger verbosity and cached stream consumers together.
+     */
     void setReportableSeverity(Logger::Severity severity)
     {
+        // Keep the global logger and already-created stream consumers in sync.
         gLogger.setReportableSeverity(severity);
         gLogVerbose.setReportableSeverity(severity);
         gLogInfo.setReportableSeverity(severity);
@@ -32,32 +36,21 @@ namespace sample
         gLogFatal.setReportableSeverity(severity);
     }
 
-    Logger::Severity get_current_log_level()
-    {
-        return  gLogger.getReportableSeverity();
-    }
-
-    void set_log_path(const std::string& log_file_path)
-    {
-        sample::set_log_file_path_111(log_file_path);
-    }
-
+    /**
+     * @brief Print a customer-visible message to the selected logger, stdout, and optional file.
+     */
     void user_visible_log(LogStreamConsumer& rt_logger, const std::string& log_path, const std::string& log_text)
     {
+        // Mirror important customer-facing messages to the runtime log and stdout.
         rt_logger << log_text << std::endl;
         std::cout << log_text << std::endl;
-
-//        if (get_current_log_level() == Logger::Severity::kVERBOSE)
-//        {
-//            return;
-//        }
-
 
         if (log_path.empty())
         {
             return;
         }
 
+        // When requested, also append the message to a caller-provided log file.
         std::ofstream file_stream;
         file_stream.open(log_path, std::ios_base::app | std::ios_base::in);
         if (!file_stream.is_open()) {
@@ -68,6 +61,9 @@ namespace sample
         file_stream.close();
     }
 
+    /**
+     * @brief Print a customer-visible informational message.
+     */
     void user_visible_log(const std::string& log_text)
     {
         return user_visible_log(gLogInfo, "", log_text);

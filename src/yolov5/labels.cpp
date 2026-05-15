@@ -9,6 +9,7 @@
  */
 const std::vector<std::string>& coco80_class_labels()
 {
+    // Keep labels in the same order as COCO-trained YOLOv5 model outputs.
     static const std::vector<std::string> kLabels = {
         "person",        "bicycle",       "car",           "motorcycle",    "airplane",      "bus",           "train",         "truck",
         "boat",          "traffic light", "fire hydrant",  "stop sign",     "parking meter", "bench",         "bird",          "cat",
@@ -24,8 +25,12 @@ const std::vector<std::string>& coco80_class_labels()
     return kLabels;
 }
 
+/**
+ * @brief Return a display label for a detection class id.
+ */
 std::string detection_class_label(int class_id, const std::vector<std::string>& names)
 {
+    // Use the embedded label when available and fall back to a stable class_<id> string.
     if (class_id >= 0 && class_id < static_cast<int>(names.size())) {
         return names[static_cast<size_t>(class_id)];
     }

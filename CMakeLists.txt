@@ -23,6 +23,13 @@ set(RppRT_DIR /usr/local/rpp)
 set(RppRT_LIBS ${RppRT_DIR}/lib)
 set(RppRT_INCLUDE_DIRS "${RppRT_DIR}/include")
 set(ThirdPartyLib_Include ${ROOT_DIRECTORY}/3rd_party)
+set(YOLO_BUILD_BIN_DIR ${CMAKE_BINARY_DIR}/bin)
+set(YOLO_BUILD_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
+set(YOLO_BUILD_ASSETS_DIR ${CMAKE_BINARY_DIR}/assets)
+set(YOLO_BUILD_OUTPUT_DIR ${CMAKE_BINARY_DIR}/output)
+set(YOLO_BUILD_TRACE_DIR ${CMAKE_BINARY_DIR}/trace)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${YOLO_BUILD_BIN_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${YOLO_BUILD_LIB_DIR})
 
 message(STATUS "ROOT_DIRECTORY: ${ROOT_DIRECTORY}")
 
@@ -35,32 +42,34 @@ find_package(OpenCV REQUIRED COMPONENTS
 link_directories(${RppRT_LIBS})
 set(rpprt_libs RppRT nvonnxparser caffeparser urpp)
 
-set(PROJECT_INCLUDE_DIRS
-    ${ROOT_DIRECTORY}/src/core
-    ${ROOT_DIRECTORY}/src/perf
-    ${ROOT_DIRECTORY}/src/utils
-    ${ROOT_DIRECTORY}/src/yolov5
-    ${ROOT_DIRECTORY}/rpp_preprocess
-    ${ROOT_DIRECTORY}/rpp_postprocess
-    ${ThirdPartyLib_Include}
-    ${RppRT_INCLUDE_DIRS}
-    ${OpenCV_INCLUDE_DIRS}
-)
+set(YOLOV5_INCLUDE_DIR ${ROOT_DIRECTORY}/src/yolov5)
+set(YOLO_UTILS_INCLUDE_DIR ${ROOT_DIRECTORY}/src/utils)
+set(YOLO_PERF_INCLUDE_DIR ${ROOT_DIRECTORY}/src/perf)
+set(RPP_RUNTIME_INCLUDE_DIR ${ROOT_DIRECTORY}/rpp/runtime)
+set(RPP_PREPROCESS_INCLUDE_DIR ${ROOT_DIRECTORY}/rpp/preprocess)
+set(RPP_POSTPROCESS_INCLUDE_DIR ${ROOT_DIRECTORY}/rpp/postprocess)
 
 add_library(yolov5_utils SHARED
     ${ROOT_DIRECTORY}/src/utils/logger.cpp
     ${ROOT_DIRECTORY}/src/utils/logging.cpp
 )
-target_include_directories(yolov5_utils PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_include_directories(yolov5_utils PUBLIC
+    ${YOLO_UTILS_INCLUDE_DIR}
+    ${RppRT_INCLUDE_DIRS}
+)
 set_target_properties(yolov5_utils PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
 )
 
 add_library(perf_trace SHARED
     ${ROOT_DIRECTORY}/src/perf/perf_trace_session.cpp
 )
-target_include_directories(perf_trace PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_include_directories(perf_trace PUBLIC
+    ${YOLO_PERF_INCLUDE_DIR}
+)
+target_include_directories(perf_trace PRIVATE
+    ${RppRT_INCLUDE_DIRS}
+)
 target_link_libraries(perf_trace PRIVATE pthread)
 if(YOLO_ENABLE_RPP_PERF)
     target_compile_definitions(perf_trace PRIVATE YOLO_ENABLE_RPP_PERF=1)
@@ -68,79 +77,117 @@ if(YOLO_ENABLE_RPP_PERF)
     target_link_libraries(perf_trace PRIVATE rpp_perf urpp)
 endif()
 set_target_properties(perf_trace PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
 )
 
-add_library(rpp_preprocessing SHARED
-    ${ROOT_DIRECTORY}/rpp_preprocess/rpp_yolo_preprocessor.cpp
-    ${ROOT_DIRECTORY}/rpp_preprocess/rpp_preprocess_kernels.cu
+add_library(rpp_yolo_preprocess SHARED
+    ${ROOT_DIRECTORY}/rpp/preprocess/rpp_yolo_preprocessor.cpp
+    ${ROOT_DIRECTORY}/rpp/preprocess/rpp_preprocess_kernels.cu
 )
-target_include_directories(rpp_preprocessing PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(rpp_preprocessing PUBLIC perf_trace yolov5_utils ${rpprt_libs})
-set_target_properties(rpp_preprocessing PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+target_include_directories(rpp_yolo_preprocess PUBLIC
+    ${RPP_PREPROCESS_INCLUDE_DIR}
+    ${YOLOV5_INCLUDE_DIR}
+    ${RppRT_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_include_directories(rpp_yolo_preprocess PRIVATE
+    ${YOLO_PERF_INCLUDE_DIR}
+    ${YOLO_UTILS_INCLUDE_DIR}
+)
+target_link_libraries(rpp_yolo_preprocess PUBLIC perf_trace yolov5_utils ${rpprt_libs})
+set_target_properties(rpp_yolo_preprocess PROPERTIES
     BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
 )
 
-add_library(rpp_postprocessing SHARED
-    ${ROOT_DIRECTORY}/rpp_postprocess/rpp_yolo_postprocessor.cpp
+add_library(rpp_yolo_postprocess SHARED
+    ${ROOT_DIRECTORY}/rpp/postprocess/rpp_yolo_postprocessor.cpp
 )
-target_include_directories(rpp_postprocessing PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(rpp_postprocessing PUBLIC perf_trace yolov5_utils ${rpprt_libs})
-set_target_properties(rpp_postprocessing PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+target_include_directories(rpp_yolo_postprocess PUBLIC
+    ${RPP_POSTPROCESS_INCLUDE_DIR}
+    ${YOLOV5_INCLUDE_DIR}
+    ${RppRT_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_include_directories(rpp_yolo_postprocess PRIVATE
+    ${YOLO_PERF_INCLUDE_DIR}
+    ${YOLO_UTILS_INCLUDE_DIR}
+)
+target_link_libraries(rpp_yolo_postprocess PUBLIC perf_trace yolov5_utils ${rpprt_libs})
+set_target_properties(rpp_yolo_postprocess PROPERTIES
+    BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
+)
+
+add_library(rpp_runtime SHARED
+    ${ROOT_DIRECTORY}/rpp/runtime/rpp_infer_engine.cpp
+)
+target_include_directories(rpp_runtime PUBLIC
+    ${RPP_RUNTIME_INCLUDE_DIR}
+    ${YOLO_UTILS_INCLUDE_DIR}
+    ${RppRT_INCLUDE_DIRS}
+)
+target_link_libraries(rpp_runtime PUBLIC yolov5_utils ${rpprt_libs})
+set_target_properties(rpp_runtime PROPERTIES
     BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
 )
 
 add_library(yolov5_core SHARED
-    ${ROOT_DIRECTORY}/src/core/rpp_infer_engine.cpp
     ${ROOT_DIRECTORY}/src/yolov5/labels.cpp
     ${ROOT_DIRECTORY}/src/yolov5/yolo_pipeline.cpp
 )
-target_include_directories(yolov5_core PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_include_directories(yolov5_core PUBLIC
+    ${YOLOV5_INCLUDE_DIR}
+    ${OpenCV_INCLUDE_DIRS}
+)
 target_link_libraries(yolov5_core PUBLIC
     perf_trace
-    rpp_preprocessing
-    rpp_postprocessing
+    rpp_runtime
+    rpp_yolo_preprocess
+    rpp_yolo_postprocess
     yolov5_utils
     ${OpenCV_LIBS}
     ${rpprt_libs}
     pthread
 )
 set_target_properties(yolov5_core PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
 )
 
 add_library(yolov5_visualization SHARED
-    ${ROOT_DIRECTORY}/src/yolov5/visualize.cpp
+    ${ROOT_DIRECTORY}/src/yolov5/visualization.cpp
 )
-target_include_directories(yolov5_visualization PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_include_directories(yolov5_visualization PUBLIC
+    ${YOLOV5_INCLUDE_DIR}
+    ${OpenCV_INCLUDE_DIRS}
+)
 target_link_libraries(yolov5_visualization PUBLIC yolov5_core ${OpenCV_LIBS})
 set_target_properties(yolov5_visualization PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
 )
 
 add_executable(yolov5_rgb_image_demo
     ${ROOT_DIRECTORY}/demos/rgb_image_single_process/main.cpp
 )
-target_include_directories(yolov5_rgb_image_demo PRIVATE ${PROJECT_INCLUDE_DIRS})
+target_include_directories(yolov5_rgb_image_demo PRIVATE
+    ${ThirdPartyLib_Include}
+)
 target_link_libraries(yolov5_rgb_image_demo PRIVATE yolov5_core yolov5_visualization)
 set_target_properties(yolov5_rgb_image_demo PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-    BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
+    BUILD_RPATH "$ORIGIN/../lib;${RppRT_LIBS}"
 )
 
 add_executable(yolov5_yuv_image_demo
     ${ROOT_DIRECTORY}/demos/yuv_image_single_process/main.cpp
 )
-target_include_directories(yolov5_yuv_image_demo PRIVATE ${PROJECT_INCLUDE_DIRS})
+target_include_directories(yolov5_yuv_image_demo PRIVATE
+    ${ThirdPartyLib_Include}
+)
 target_link_libraries(yolov5_yuv_image_demo PRIVATE yolov5_core yolov5_visualization)
 set_target_properties(yolov5_yuv_image_demo PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-    BUILD_RPATH "$ORIGIN;${RppRT_LIBS}"
+    BUILD_RPATH "$ORIGIN/../lib;${RppRT_LIBS}"
 )
 
-configure_file("${ROOT_DIRECTORY}/image/test_1.png" "${CMAKE_BINARY_DIR}/test_1.png" COPYONLY)
+file(MAKE_DIRECTORY ${YOLO_BUILD_ASSETS_DIR})
+file(MAKE_DIRECTORY ${YOLO_BUILD_OUTPUT_DIR})
+file(MAKE_DIRECTORY ${YOLO_BUILD_TRACE_DIR})
+configure_file("${ROOT_DIRECTORY}/assets/test_1.png" "${YOLO_BUILD_ASSETS_DIR}/test_1.png" COPYONLY)
+configure_file("${ROOT_DIRECTORY}/assets/test_0.yuv" "${YOLO_BUILD_ASSETS_DIR}/test_0.yuv" COPYONLY)

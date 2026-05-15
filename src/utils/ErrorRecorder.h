@@ -1,11 +1,6 @@
-/** @file ErrorRecorder.h
- *
- * @brief
- * @author XDLTek Technologies
- * COPYRIGHT(c) 2020-2022 XDLTek Technologies.
- * ALL RIGHTS RESERVED
- *
- * This is Unpublished Proprietary Source Code of XDLTek Technologies
+/**
+ * @file ErrorRecorder.h
+ * @brief Simple runtime error recorder used by sample logging.
  */
 
 #ifndef ERROR_RECORDER_H
@@ -20,50 +15,62 @@
 #include "Infer.h"
 #include "logger.h"
 
-//!
-//! A simple imeplementation of the IErrorRecorder interface for
-//! use by samples. This interface also can be used as a reference
-//! implementation.
-//! The sample Error recorder is based on a vector that pairs the error
-//! code and the error string into a single element. It also uses
-//! standard mutex's and atomics in order to make sure that the code
-//! works in a multi-threaded environment.
-//! SampleErrorRecorder is not intended for use in automotive safety
-//! environments.
-//!
+/**
+ * @brief Collect runtime errors in a thread-safe vector-backed recorder.
+ */
 class SampleErrorRecorder : public infer1::IErrorRecorder
 {
     using errorPair = std::pair<infer1::ErrorCode, std::string>;
     using errorStack = std::vector<errorPair>;
 
     public:
+        /**
+         * @brief Construct an empty recorder with zero runtime references.
+         */
         SampleErrorRecorder() = default;
 
+        /**
+         * @brief Destroy the recorder after runtime ownership has been released.
+         */
         virtual ~SampleErrorRecorder() noexcept {}
+        /**
+         * @brief Return the number of recorded runtime errors.
+         */
         int32_t getNbErrors() const noexcept final
         {
             return mErrorStack.size();
         }
-    infer1::ErrorCode getErrorCode(int32_t errorIdx) const noexcept final
+        /**
+         * @brief Return the runtime error code for a recorded error index.
+         */
+        infer1::ErrorCode getErrorCode(int32_t errorIdx) const noexcept final
         {
             return indexCheck(errorIdx) ? infer1::ErrorCode::kINVALID_ARGUMENT : (*this)[errorIdx].first;
         };
+        /**
+         * @brief Return the runtime error description for a recorded error index.
+         */
         IErrorRecorder::ErrorDesc getErrorDesc(int32_t errorIdx) const noexcept final
         {
             return indexCheck(errorIdx) ? "errorIdx out of range." : (*this)[errorIdx].second.c_str();
         }
-        // This class can never overflow since we have dynamic resize via std::vector usage.
+        /**
+         * @brief Return whether the fixed recorder capacity has been exceeded.
+         */
         bool hasOverflowed() const noexcept final
         {
+            // This recorder can grow dynamically through std::vector.
             return false;
         }
 
-        // Empty the errorStack.
+        /**
+         * @brief Clear all recorded errors while holding the stack mutex.
+         */
         void clear() noexcept final
         {
             try 
             {
-                // grab a lock so that there is no addition while clearing.
+                // Hold the lock so no other thread appends while the stack is cleared.
                 std::lock_guard<std::mutex> guard(mStackLock);
                 mErrorStack.clear();
             }
@@ -73,12 +80,17 @@ class SampleErrorRecorder : public infer1::IErrorRecorder
             }
         };
 
-        //! Simple helper function that 
+        /**
+         * @brief Return whether the recorder currently has no errors.
+         */
         bool empty() const noexcept
         {
             return mErrorStack.empty();
         }
 
+        /**
+         * @brief Append a runtime error to the recorder.
+         */
         bool reportError(infer1::ErrorCode val, IErrorRecorder::ErrorDesc desc) noexcept final {
             try
             {
@@ -89,27 +101,37 @@ class SampleErrorRecorder : public infer1::IErrorRecorder
             {
                 sample::gLogFatal << e.what() << std::endl;
             }
-            // All errors are considered fatal.
+            // Tell the runtime that the reported error should be treated as fatal.
             return true;
         }
 
-        // Atomically increment or decrement the ref counter.
+        /**
+         * @brief Atomically increment the runtime-owned reference counter.
+         */
         IErrorRecorder::RefCount incRefCount() noexcept final
         {
             return ++mRefCount;
         }
+        /**
+         * @brief Atomically decrement the runtime-owned reference counter.
+         */
         IErrorRecorder::RefCount decRefCount() noexcept final
         {
             return --mRefCount;
         }
 
     private:
-        // Simple helper functions.
+        /**
+         * @brief Return the stored error pair after callers have validated the index.
+         */
         const errorPair& operator[](size_t index) const noexcept
         {
             return mErrorStack[index];
         }
 
+        /**
+         * @brief Check whether a signed error index is outside the current stack.
+         */
         bool indexCheck(int32_t index) const noexcept
         {
             // By converting signed to unsigned, we only need a single check since
@@ -117,14 +139,13 @@ class SampleErrorRecorder : public infer1::IErrorRecorder
             size_t sIndex = index;
             return sIndex >= mErrorStack.size();
         }
-        // Mutex to hold when locking mErrorStack.
+        // Protects mErrorStack during report and clear operations.
         std::mutex mStackLock;
 
-        // Reference count of the class. Destruction of the class when mRefCount
-        // is not zero causes undefined behavior.
+        // Reference count managed by the runtime interface.
         std::atomic<int32_t> mRefCount{0};
 
-        // The error stack that holds the errors recorded by TensorRT.
+        // Stored runtime error codes and descriptions.
         errorStack mErrorStack;
 }; // class SampleErrorRecorder
 #endif // ERROR_RECORDER_H

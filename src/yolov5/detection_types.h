@@ -7,6 +7,9 @@
 
 #include <opencv2/core.hpp>
 
+/**
+ * @brief One YOLOv5 detection restored to original image coordinates.
+ */
 struct Detection
 {
     // Index into class-name list (`coco80_class_labels()` for standard COCO models).
@@ -17,19 +20,34 @@ struct Detection
     cv::Rect box;
 };
 
+/**
+ * @brief Geometry metadata shared by preprocessing and postprocessing.
+ */
 struct LetterboxInfo
 {
+    // Width of the original source image or frame.
     int source_width = 0;
+    // Height of the original source image or frame.
     int source_height = 0;
+    // Width of the model input tensor.
     int model_width = 0;
+    // Height of the model input tensor.
     int model_height = 0;
+    // Width after aspect-ratio-preserving resize.
     int resized_width = 0;
+    // Height after aspect-ratio-preserving resize.
     int resized_height = 0;
+    // Scale applied from source coordinates to resized coordinates.
     float scale = 1.0f;
+    // Horizontal padding inserted by letterbox.
     float pad_x = 0.0f;
+    // Vertical padding inserted by letterbox.
     float pad_y = 0.0f;
 };
 
+/**
+ * @brief Runtime parameters for a standard YOLOv5s-style detection model.
+ */
 struct YoloV5Config
 {
     int input_width = 640;

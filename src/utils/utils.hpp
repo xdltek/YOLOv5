@@ -1,107 +1,16 @@
 #pragma once
+
+#include <cstdlib>
+#include <string>
 #include <vector>
-#include <iostream>
-#include <math.h>
-#include <numeric>
-template<class T>
-float ErrMaxMse(std::vector<T> ort, std::vector<T> rt)
+
+/**
+ * @brief Expand a leading `~` in a user-provided path to the current HOME directory.
+ * @param path CLI path value before filesystem validation.
+ */
+inline std::string expand_user_path(const std::string& path)
 {
-    if(ort.size() != rt.size())
-    {
-        std::cout << "rt and ort data size is not equal" << std::endl;
-        return 0.0;
-    }
-
-    float err_max =0.0;
-    int pos = 0;
-    for(int i = 0; i < ort.size(); ++i)
-    {
-        if(err_max < std::fabs(ort[i] - rt[i]))
-        {
-            err_max = std::fabs(ort[i] - rt[i]);
-            pos = i;
-        }
-    }
-
-    float err_max_relative_error = std::fabs(ort[pos] - rt[pos]) / (std::fabs(ort[pos]) + std::fabs(rt[pos]));
-    return err_max_relative_error;
-}
-
-template<class T>
-float CalcSTD(std::vector<T> data)
-{
-    double sum = std::accumulate(data.begin(), data.end(), 0.0);
-    double mean = sum / data.size();
-
-    double variance = 0.0;
-    for (float x : data){
-        variance += std::pow(x - mean, 2);
-    }
-    return std::sqrt(variance / data.size());
-}
-
-template<typename T>
-std::vector<float> PrecisionCheck(std::vector<T>& ort, std::vector<T>& rt)
-{
-    std::vector<float> res;
-    float err_acc = 0;
-    float amp_acc = 0;
-    std::vector<float> abs_err;
-    for (size_t j = 0; j < ort.size(); j++)
-    {
-        float err = ort.at(j) -rt.at(j);
-        err_acc += err*err;
-        amp_acc += ort.at(j) * rt.at(j);
-        abs_err.emplace_back(std::fabs(err));
-    }
-    float mse = err_acc / amp_acc;
-    float std = CalcSTD(abs_err);
-    float err_max_mse = ErrMaxMse(ort, rt);
-    res.emplace_back(mse);
-    res.emplace_back(std);
-    res.emplace_back(err_max_mse);
-    res.emplace_back(err_acc);
-    res.emplace_back(amp_acc);
-    return res;
-}
-
-//std::map<std::string, int> GetModelNameAndType(std::string model_name, std::string model_path)
-//{
-//    Ort::Env env;
-//    Ort::Session session_{ env, model_path.c_str() , Ort::SessionOptions{nullptr} };
-//    auto type_info = session_.GetInputTypeInfo(0);
-//    size_t inputNodeCount = session_.GetInputCount();
-//    Ort::AllocatorWithDefaultOptions allocator;
-//    std::map<std::string, int>name_2_type;
-//    for (size_t i = 0; i < inputNodeCount; ++i)
-//    {
-//        Ort::TypeInfo inputTypeInfo = session_.GetInputTypeInfo(i);
-//        auto input_tensor_info = inputTypeInfo.GetTensorTypeAndShapeInfo();
-//        ONNXTensorElementDataType inputNodeDataType = input_tensor_info.GetElementType();
-////            std::cout << "name " << session_.GetInputNameAllocated(i,allocator).get() << " type: " << inputNodeDataType << std::endl;
-//        name_2_type[session_.GetInputNameAllocated(i,allocator).get()] = inputNodeDataType;
-//    }
-//    size_t outputNodeCount = session_.GetOutputCount();
-//    for (size_t i = 0; i < outputNodeCount; ++i)
-//    {
-//        Ort::TypeInfo outputTypeInfo = session_.GetOutputTypeInfo(i);
-//        auto output_tensor_info = outputTypeInfo.GetTensorTypeAndShapeInfo();
-//        ONNXTensorElementDataType outputNodeDataType = output_tensor_info.GetElementType();
-////            std::cout << "name " << session_.GetOutputNameAllocated(i,allocator).get() << " type: " << outputNodeDataType << std::endl;
-//        name_2_type[session_.GetOutputNameAllocated(i,allocator).get()] = outputNodeDataType;
-//    }
-//    return name_2_type;
-//}
-
-template <class T1, class T2>
-void castData(std::vector<T1> &in, std::vector<T2> &out){
-    int length = in.size();
-    out.resize(length);
-    for(auto i=0;i<length;i++)
-        out[i] = (T2)in[i];
-}
-
-inline std::string expand_user_path(const std::string& path) {
+    // Only a leading tilde is treated as a shell-style home shortcut.
     if (!path.empty() && path[0] == '~') {
         const char* home = std::getenv("HOME");
         if (home) {
@@ -111,12 +20,18 @@ inline std::string expand_user_path(const std::string& path) {
     return path;
 }
 
-inline std::vector<std::string> preprocess_args(int argc, char* argv[]) {
+/**
+ * @brief Normalize short `-x=value` CLI arguments into `-x value` for argparse.
+ * @param argc Number of original command-line arguments.
+ * @param argv Original command-line argument values.
+ */
+inline std::vector<std::string> preprocess_args(int argc, char* argv[])
+{
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
-        // handle short argument with '='
+        // Split only short options; long options are already handled by argparse.
         if (arg.size() > 2 && arg[0] == '-' && arg[1] != '-' && arg.find('=') != std::string::npos) {
             size_t pos = arg.find('=');
             std::string flag = arg.substr(0, pos);
@@ -131,11 +46,18 @@ inline std::vector<std::string> preprocess_args(int argc, char* argv[]) {
     return args;
 }
 
-
+/**
+ * @brief Build the argv-compatible pointer list consumed by argparse.
+ * @param preprocessed_arguments Stable normalized argument strings.
+ * @param original_argv Original argv array, used to preserve program name.
+ * @param fixed_arguments Output pointer list passed to ArgumentParser::parse_args.
+ */
 inline void to_char_argument_vector(const std::vector<std::string>& preprocessed_arguments, char* original_argv[],
-                             std::vector<const char*>& fixed_arguments) {
+                                    std::vector<const char*>& fixed_arguments)
+{
     fixed_arguments.clear();
-    fixed_arguments.push_back(original_argv[0]); // 程序名
+    // Keep argv[0] as the executable name expected by CLI parsers.
+    fixed_arguments.push_back(original_argv[0]);
     for (auto& preprocessed_argument : preprocessed_arguments) {
         fixed_arguments.push_back(preprocessed_argument.data());
     }

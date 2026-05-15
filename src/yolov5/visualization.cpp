@@ -1,8 +1,8 @@
 /**
- * @file visualize.cpp
+ * @file visualization.cpp
  * @brief YOLOv5 visualization helpers.
  */
-#include "visualize.h"
+#include "visualization.h"
 #include "labels.h"
 
 #include <opencv2/imgcodecs.hpp>
@@ -10,8 +10,12 @@
 
 namespace
 {
+/**
+ * @brief Return the fixed palette used when drawing detection boxes.
+ */
 const std::vector<cv::Scalar>& detection_colors()
 {
+    // Cycle a small high-contrast palette across class ids.
     static const std::vector<cv::Scalar> kColors = {
         cv::Scalar(255, 255, 0),
         cv::Scalar(0, 255, 0),
@@ -22,8 +26,12 @@ const std::vector<cv::Scalar>& detection_colors()
 }
 }
 
+/**
+ * @brief Draw detection boxes and labels onto an image.
+ */
 void draw_detections(cv::Mat& image, const std::vector<Detection>& detections, const std::vector<std::string>& class_names)
 {
+    // Draw boxes first, then overlay a filled label strip for readability.
     const auto& colors = detection_colors();
 
     for (const auto& detection : detections) {
@@ -39,7 +47,11 @@ void draw_detections(cv::Mat& image, const std::vector<Detection>& detections, c
     }
 }
 
+/**
+ * @brief Save a visualization image to disk using OpenCV image codecs.
+ */
 bool save_detection_image(const std::string& output_path, const cv::Mat& image)
 {
+    // cv::imwrite selects the encoder from the output file extension.
     return cv::imwrite(output_path, image);
 }
