@@ -1,6 +1,6 @@
 /**
  * @file main.cpp
- * @brief Single-process YOLOv5 I420 YUV image demo.
+ * @brief YOLOv5 RGB/BGR image demo.
  */
 #include "argparse/argparse.hpp"
 #include "labels.h"
@@ -10,12 +10,11 @@
 #include "visualization.h"
 #include "yolo_pipeline.h"
 
-#include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -23,6 +22,13 @@
 
 namespace
 {
+#ifdef YOLO_ENABLE_RPP_PERF
+constexpr bool kPerfTraceEnabled = true;
+#else
+constexpr bool kPerfTraceEnabled = false;
+#endif
+constexpr const char* kPerfTraceDir = "../trace";
+
 /**
  * @brief Convert byte counts to KiB for the latency summary.
  * @param bytes Number of bytes transferred.
@@ -85,43 +91,28 @@ YoloV5StageTimes average_times(const YoloV5StageTimes& total, int count)
 }
 
 /**
- * @brief Run the I420 YUV image demo from CLI parsing through rendered output.
+ * @brief Run the RGB/BGR image demo from CLI parsing through rendered output.
  * @param argc Number of command-line arguments.
  * @param argv Command-line argument values.
  */
 int main(int argc, char** argv)
 {
     // Step 1: declare the command-line contract for this demo.
-    argparse::ArgumentParser program("yolov5 yuv image demo", "0.1", argparse::default_arguments::help);
+    argparse::ArgumentParser program("yolov5 rgb image demo", "0.1", argparse::default_arguments::help);
 
     program.add_argument("-o", "--onnx")
             .required()
             .help("path to the YOLOv5 ONNX model file.");
-    program.add_argument("--yuv")
-            .default_value(std::string("../assets/test_0.yuv"))
-            .help("path of one-frame I420 YUV file.");
-    program.add_argument("--yuv-width")
-            .default_value(1280)
-            .help("I420 YUV frame width.")
-            .scan<'i', int>();
-    program.add_argument("--yuv-height")
-            .default_value(720)
-            .help("I420 YUV frame height.")
-            .scan<'i', int>();
+    program.add_argument("-i", "--image")
+            .default_value(std::string("../assets/test_1.png"))
+            .help("path of RGB/BGR image file.");
     program.add_argument("--output")
-            .default_value(std::string("../output/output_yuv.jpg"))
+            .default_value(std::string("../output/output_rgb.jpg"))
             .help("path of visualization output image.");
     program.add_argument("-l", "--loop")
             .default_value(1)
             .help("measured full-pipeline loop count after one warmup pass.")
             .scan<'i', int>();
-    program.add_argument("-p", "--perf")
-            .help("save rpp_perf trace json.")
-            .default_value(false)
-            .implicit_value(true);
-    program.add_argument("--perf-dir")
-            .default_value(std::string("../trace"))
-            .help("rpp_perf trace output directory.");
     program.add_argument("-v", "--verbose")
             .help("show verbose runtime log.")
             .default_value(false)
@@ -140,19 +131,13 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    // Step 3: read parsed options and expand user-friendly paths such as ~/frame.yuv.
+    // Step 3: read parsed options and expand user-friendly paths such as ~/model.onnx.
     std::string model_path = expand_user_path(program.get<std::string>("--onnx"));
-    std::string yuv_path = expand_user_path(program.get<std::string>("--yuv"));
+    std::string image_path = expand_user_path(program.get<std::string>("--image"));
     std::string output_path = expand_user_path(program.get<std::string>("--output"));
-    int yuv_width = program.get<int>("--yuv-width");
-    int yuv_height = program.get<int>("--yuv-height");
     int repeat_count = program.get<int>("--loop");
     if (repeat_count <= 0) {
         std::cerr << "--loop must be greater than 0." << std::endl;
-        return EXIT_FAILURE;
-    }
-    if (yuv_width <= 0 || yuv_height <= 0 || (yuv_width % 2) != 0 || (yuv_height % 2) != 0) {
-        std::cerr << "--yuv-width and --yuv-height must be positive even values for I420 input." << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -166,33 +151,24 @@ int main(int argc, char** argv)
         std::cerr << "Cannot found onnx model file, path: " << model_path << std::endl;
         return EXIT_FAILURE;
     }
-    if (!std::filesystem::exists(yuv_path)) {
-        std::cerr << "Cannot found yuv file, path: " << yuv_path << std::endl;
+    if (!std::filesystem::exists(image_path)) {
+        std::cerr << "Cannot found image file, path: " << image_path << std::endl;
         return EXIT_FAILURE;
     }
 
     std::cout << "Model path: " << model_path << "\n"
-              << "Inference YUV path: " << yuv_path << std::endl;
+              << "Inference image path: " << image_path << std::endl;
 
-    // I420 stores full-size Y plus quarter-size U and V planes.
-    size_t yuv_bytes = static_cast<size_t>(yuv_width) * static_cast<size_t>(yuv_height) * 3U / 2U;
-    std::vector<unsigned char> yuv_data(yuv_bytes);
-    std::ifstream yuv_file(yuv_path, std::ios::binary);
-    if (!yuv_file.read(reinterpret_cast<char*>(yuv_data.data()), static_cast<std::streamsize>(yuv_data.size()))) {
-        std::cerr << "Failed to read one I420 frame from: " << yuv_path << std::endl;
+    // OpenCV decodes the host image; RPP preprocessing consumes the resulting BGR buffer.
+    cv::Mat frame = cv::imread(image_path);
+    if (frame.empty()) {
+        std::cerr << "Failed to load image: " << image_path << std::endl;
         return EXIT_FAILURE;
     }
 
-    // This host-side conversion is only for rendering the final boxes on a viewable image.
-    cv::Mat yuv_mat(yuv_height * 3 / 2, yuv_width, CV_8UC1, yuv_data.data());
-    cv::Mat frame;
-    cv::cvtColor(yuv_mat, frame, cv::COLOR_YUV2BGR_I420);
-
-    // Step 6: optionally start rpp_perf before initialization so build and runtime events share one trace.
-    PerfTraceSession trace_session("yolov5_yuv_image_demo",
-                                   program["--perf"] == true,
-                                   expand_user_path(program.get<std::string>("--perf-dir")));
-    // Enable driver-side trace records only when this demo owns an active perf session.
+    // Step 6: start rpp_perf automatically in perf-enabled builds so init and run events share one trace.
+    PerfTraceSession trace_session("yolov5_rgb_image_demo", kPerfTraceEnabled, kPerfTraceDir);
+    // Enable driver-side trace records only when this build owns an active perf session.
     trace_session.enableDriverTrace(0);
 
     // Step 7: initialize the reusable YOLOv5 pipeline around the requested model.
@@ -210,7 +186,7 @@ int main(int argc, char** argv)
     std::vector<Detection> warmup_output;
     {
         PERF_SCOPE_CATE("demo_warmup_run", "yolov5");
-        if (!pipeline.runI420(yuv_data.data(), yuv_data.size(), yuv_width, yuv_height, warmup_output, nullptr)) {
+        if (!pipeline.runRgb(frame, warmup_output, nullptr)) {
             return EXIT_FAILURE;
         }
     }
@@ -221,7 +197,7 @@ int main(int argc, char** argv)
     for (int i = 0; i < repeat_count; ++i) {
         PERF_SCOPE_CATE("demo_measured_loop", "yolov5");
         YoloV5StageTimes loop_times;
-        if (!pipeline.runI420(yuv_data.data(), yuv_data.size(), yuv_width, yuv_height, output, &loop_times)) {
+        if (!pipeline.runRgb(frame, output, &loop_times)) {
             return EXIT_FAILURE;
         }
         total_times.input_h2d_ms += loop_times.input_h2d_ms;
@@ -234,7 +210,7 @@ int main(int argc, char** argv)
         total_times.end_to_end_ms += loop_times.end_to_end_ms;
     }
 
-    // Step 9: render the last measured detections onto the BGR view of the input YUV frame.
+    // Step 9: render the last measured detections onto the original host image.
     draw_detections(frame, output, class_list);
     if (!save_detection_image(output_path, frame)) {
         std::cerr << "Failed to save image: " << output_path << std::endl;

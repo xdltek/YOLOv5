@@ -10,7 +10,7 @@
 /**
  * @brief Start an rpp_perf trace window when the caller enables tracing.
  * @param prefix Prefix used by rpp_perf when naming trace output.
- * @param enabled Caller-controlled switch, usually from `--perf`.
+ * @param enabled Caller-controlled switch, usually derived from the build configuration.
  * @param output_dir Directory where trace files should be written.
  */
 bool perf_trace_start(const char* prefix, bool enabled, const char* output_dir);
@@ -53,7 +53,7 @@ class PerfTraceSession
 {
 public:
     /**
-     * @brief Own a demo-level trace session controlled by command-line options.
+     * @brief Own a demo-level trace session controlled by build configuration.
      * @param prefix Prefix used by rpp_perf when naming trace output.
      * @param enabled Whether trace capture should be active.
      * @param output_dir Directory where trace files should be written.

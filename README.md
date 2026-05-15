@@ -1,4 +1,8 @@
+<a id="english"></a>
+
 # YOLOv5 Inference Demo on RPP
+
+Language: [English](#english) | [中文](#chinese)
 
 ![XDL Logo](doc/logo/logo_color_horizontal.png)
 
@@ -40,7 +44,7 @@ Successful execution should print warmup-stable stage timing and FPS, and genera
 - `CMakeLists.txt`
   Root build entry. Configures shared dependencies and builds the reusable libraries and demo targets.
 - `src/perf/`
-  Optional `rpp_perf` trace session wrapper used by demos through `-p` or `--perf`; it is active only when CMake is configured with `-DYOLO_ENABLE_RPP_PERF=ON`. If `--perf` is used in a non-perf build, the demo prints a warning and continues without trace capture.
+  Optional `rpp_perf` trace session wrapper. It is active only when CMake is configured with `-DYOLO_ENABLE_RPP_PERF=ON`; perf-enabled demo builds automatically save trace files under `build/trace`.
 - `src/utils/`
   Logging, ONNX parse helper, runtime buffer helpers, and CLI/path utilities.
 - `src/yolov5/`
@@ -60,8 +64,8 @@ This repository does **not** bundle ONNX models. Class names for overlays are th
 
 The root README explains the shared build and architecture. Each executable has its own guide with its input format, command-line options, workflow, and expected output:
 
-- [RGB image single-process demo](demos/rgb_image_single_process/README.md)
-- [I420 YUV image single-process demo](demos/yuv_image_single_process/README.md)
+- [RGB image demo](demos/rgb_image/README.md)
+- [I420 YUV frame demo](demos/yuv_frame/README.md)
 
 ## Prerequisites
 
@@ -92,7 +96,7 @@ After the build completes successfully, the executable should be available at:
 
 ```shell
 build/bin/yolov5_rgb_image_demo
-build/bin/yolov5_yuv_image_demo
+build/bin/yolov5_yuv_frame_demo
 ```
 
 Build outputs are grouped as:
@@ -112,13 +116,13 @@ Run demos from `build/bin` after building the project. **`--onnx` is required** 
 ```shell
 cd build/bin
 ./yolov5_rgb_image_demo -o ../../onnx/yolov5s.onnx
-./yolov5_yuv_image_demo -o ../../onnx/yolov5s.onnx
+./yolov5_yuv_frame_demo -o ../../onnx/yolov5s.onnx
 ```
 
 For full command-line options and expected output, see the per-demo guides:
 
-- [RGB image single-process demo](demos/rgb_image_single_process/README.md)
-- [I420 YUV image single-process demo](demos/yuv_image_single_process/README.md)
+- [RGB image demo](demos/rgb_image/README.md)
+- [I420 YUV frame demo](demos/yuv_frame/README.md)
 
 ## Code Execution Workflow
 
@@ -130,8 +134,9 @@ For full command-line options and expected output, see the per-demo guides:
             |
             v
 +------------------------+
-| Init optional --perf   |
-| trace session          |
+| Init optional perf     |
+| trace session in perf  |
+| builds                 |
 +------------------------+
             |
             v
@@ -171,11 +176,11 @@ For full command-line options and expected output, see the per-demo guides:
 - `src/yolov5/yolo_pipeline.*`
   YOLOv5 pipeline composition. Runs RPP preprocessing, inference, and RPP postprocessing once per call without hidden warmup.
 - `src/perf/perf_trace_session.*`
-  Optional rpp_perf trace wrapper used by demos through `-p` or `--perf`.
-- `demos/rgb_image_single_process/main.cpp`
+  Optional rpp_perf trace wrapper used automatically when the project is built with `-DYOLO_ENABLE_RPP_PERF=ON`.
+- `demos/rgb_image/main.cpp`
   RGB/BGR image demo entry point.
-- `demos/yuv_image_single_process/main.cpp`
-  I420 YUV image demo entry point.
+- `demos/yuv_frame/main.cpp`
+  I420 YUV frame demo entry point.
 
 ## Reusable Components
 
@@ -194,7 +199,11 @@ For full command-line options and expected output, see the per-demo guides:
 
 ---
 
+<a id="chinese"></a>
+
 # YOLOv5 RPP 推理 Demo
+
+语言：[English](#english) | [中文](#chinese)
 
 ![XDL Logo](doc/logo/logo_color_horizontal.png)
 
@@ -235,7 +244,7 @@ cd bin
 - `CMakeLists.txt`
   根构建入口。负责配置公共依赖，并构建可复用库和 demo 可执行文件。
 - `src/perf/`
-  可选的 `rpp_perf` trace 会话封装。demo 可通过 `-p` 或 `--perf` 启用；该功能只有在 CMake 配置 `-DYOLO_ENABLE_RPP_PERF=ON` 时生效。非 perf 构建中使用 `--perf` 时，demo 会打印提示并继续执行。
+  可选的 `rpp_perf` trace 会话封装。该功能只有在 CMake 配置 `-DYOLO_ENABLE_RPP_PERF=ON` 时生效；启用 perf 的 demo 构建会自动在 `build/trace` 下保存 trace 文件。
 - `src/utils/`
   日志、ONNX 解析辅助、运行时 buffer 辅助、命令行和路径工具。
 - `src/yolov5/`
@@ -243,7 +252,7 @@ cd bin
 - [`rpp/`](rpp/README.md)
   面向 RPP/RppRT 硬件执行路径的模块，包括运行时推理、前处理 kernel/模块和后处理模块。
 - `demos/`
-  demo 可执行入口，包括 RGB 图片和 I420 YUV 图片单进程 demo。
+  demo 可执行入口，包括 RGB 图片和 I420 YUV 帧 demo。
 - `assets/`
   示例输入资源，构建时会复制到 `build/assets/`，便于快速验证。
 - `3rd_party/`
@@ -255,8 +264,8 @@ cd bin
 
 根 README 说明公共构建方式和整体架构。每个 demo 目录下还有独立说明文档，用于描述对应输入格式、命令行参数、执行流程和输出结果：
 
-- [RGB 图片单进程 demo](demos/rgb_image_single_process/README.md)
-- [I420 YUV 图片单进程 demo](demos/yuv_image_single_process/README.md)
+- [RGB 图片 demo](demos/rgb_image/README.md)
+- [I420 YUV 帧 demo](demos/yuv_frame/README.md)
 
 ## 环境依赖
 
@@ -287,7 +296,7 @@ make -j8
 
 ```shell
 build/bin/yolov5_rgb_image_demo
-build/bin/yolov5_yuv_image_demo
+build/bin/yolov5_yuv_frame_demo
 ```
 
 构建产物按类型归类：
@@ -307,13 +316,13 @@ build/trace/    可选的 rpp_perf trace 文件
 ```shell
 cd build/bin
 ./yolov5_rgb_image_demo -o ../../onnx/yolov5s.onnx
-./yolov5_yuv_image_demo -o ../../onnx/yolov5s.onnx
+./yolov5_yuv_frame_demo -o ../../onnx/yolov5s.onnx
 ```
 
 完整参数和预期输出请参考各 demo 文档：
 
-- [RGB 图片单进程 demo](demos/rgb_image_single_process/README.md)
-- [I420 YUV 图片单进程 demo](demos/yuv_image_single_process/README.md)
+- [RGB 图片 demo](demos/rgb_image/README.md)
+- [I420 YUV 帧 demo](demos/yuv_frame/README.md)
 
 ## 代码执行流程
 
@@ -324,8 +333,8 @@ cd build/bin
             |
             v
 +------------------------+
-| 初始化可选 --perf      |
-| trace 会话             |
+| perf 构建中初始化      |
+| 可选 trace 会话        |
 +------------------------+
             |
             v
@@ -364,11 +373,11 @@ cd build/bin
 - `src/yolov5/yolo_pipeline.*`
   YOLOv5 pipeline 组装层。每次调用执行一次 RPP 前处理、推理和 RPP 后处理，不隐藏 warmup。
 - `src/perf/perf_trace_session.*`
-  demo 通过 `-p` 或 `--perf` 使用的可选 rpp_perf trace 封装。
-- `demos/rgb_image_single_process/main.cpp`
+  使用 `-DYOLO_ENABLE_RPP_PERF=ON` 构建时自动启用的可选 rpp_perf trace 封装。
+- `demos/rgb_image/main.cpp`
   RGB/BGR 图片 demo 入口。
-- `demos/yuv_image_single_process/main.cpp`
-  I420 YUV 图片 demo 入口。
+- `demos/yuv_frame/main.cpp`
+  I420 YUV 帧 demo 入口。
 
 ## 可复用组件
 

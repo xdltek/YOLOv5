@@ -82,7 +82,7 @@ bool perf_trace_start(const char* prefix, bool enabled, const char* output_dir)
     if (enabled) {
         std::cerr << "rpp_perf trace was requested, but this build was configured without "
                   << "YOLO_ENABLE_RPP_PERF. Reconfigure with "
-                  << "`cmake .. -DYOLO_ENABLE_RPP_PERF=ON` to enable --perf."
+                  << "`cmake .. -DYOLO_ENABLE_RPP_PERF=ON` to enable trace capture."
                   << std::endl;
     }
     return false;
@@ -182,7 +182,7 @@ bool perf_trace_enabled()
 void perf_trace_begin(const char* name, const char* category)
 {
 #ifdef YOLO_ENABLE_RPP_PERF
-    // Component code can call this unconditionally; it becomes a no-op without --perf.
+    // Component code can call this unconditionally; it becomes a no-op without an active trace window.
     if (perf_trace_enabled()) {
         TRACE_FUNC_CATE(name, category == nullptr ? "yolov5" : category);
     }

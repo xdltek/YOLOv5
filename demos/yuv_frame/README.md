@@ -1,6 +1,10 @@
-# I420 YUV Image Single-Process YOLOv5 Demo
+<a id="english"></a>
 
-This demo runs one I420 YUV frame through the reusable YOLOv5 RPP pipeline in a single host process. It is intended for camera or video workflows where the input frame is already available as planar YUV data.
+# I420 YUV Frame YOLOv5 Demo
+
+Language: [English](#english) | [中文](#chinese)
+
+This demo runs one I420 YUV frame through the reusable YOLOv5 RPP pipeline per measured loop. It is intended for camera or video workflows where the input frame is already available as planar YUV data.
 
 ## What This Demo Covers
 
@@ -10,7 +14,7 @@ This demo runs one I420 YUV frame through the reusable YOLOv5 RPP pipeline in a 
 - Run one explicit warmup pass.
 - Run measured inference loops and print stage-level latency.
 - Convert the same YUV frame to BGR on the host only for drawing the final output image.
-- Optionally save an `rpp_perf` trace with `-p` or `--perf`.
+- Automatically save an `rpp_perf` trace when the project is built with `YOLO_ENABLE_RPP_PERF=ON`.
 
 ## Build
 
@@ -27,7 +31,7 @@ make -j8
 The executable is generated at:
 
 ```text
-build/bin/yolov5_yuv_image_demo
+build/bin/yolov5_yuv_frame_demo
 ```
 
 ## Run
@@ -36,7 +40,7 @@ Run from `build/bin`. The `--onnx` argument is required.
 
 ```shell
 cd build/bin
-./yolov5_yuv_image_demo -o ../../onnx/yolov5s.onnx
+./yolov5_yuv_frame_demo -o ../../onnx/yolov5s.onnx
 ```
 
 The default input is a copied sample frame:
@@ -50,7 +54,7 @@ The default frame size is `1280x720`.
 To use another I420 frame:
 
 ```shell
-./yolov5_yuv_image_demo \
+./yolov5_yuv_frame_demo \
   -o /path/to/yolov5.onnx \
   --yuv /path/to/frame.i420 \
   --yuv-width 1280 \
@@ -66,9 +70,6 @@ To use another I420 frame:
 --yuv-height     I420 frame height. Default: 720
 --output         Rendered output image path. Default: ../output/output_yuv.jpg
 -l, --loop       Measured loop count after one warmup pass. Default: 1
--p, --perf       Save an rpp_perf trace JSON when the project is built with YOLO_ENABLE_RPP_PERF=ON.
-                 In a non-perf build, the demo prints a warning and continues without trace capture.
---perf-dir       Trace output directory. Default: ../trace
 -v, --verbose    Enable verbose runtime logging.
 ```
 
@@ -84,7 +85,7 @@ Read one I420 frame from disk
 Create BGR visualization frame on host
         |
         v
-Create optional perf trace session
+Create perf trace session in perf-enabled builds
         |
         v
 Initialize YoloV5Pipeline and RppInferEngine
@@ -128,9 +129,13 @@ Use this demo when your application receives raw I420 frames. The inference path
 
 ---
 
-# I420 YUV 图片单进程 YOLOv5 Demo
+<a id="chinese"></a>
 
-本 demo 在单个 host 进程中，将一帧 I420 YUV 数据送入可复用的 YOLOv5 RPP pipeline。它适用于摄像头或视频流场景，此类场景中输入帧通常已经是 planar YUV 格式。
+# I420 YUV 帧 YOLOv5 Demo
+
+语言：[English](#english) | [中文](#chinese)
+
+本 demo 在每次测量 loop 中，将一帧 I420 YUV 数据送入可复用的 YOLOv5 RPP pipeline。它适用于摄像头或视频流场景，此类场景中输入帧通常已经是 planar YUV 格式。
 
 ## 这个 Demo 包含什么
 
@@ -140,7 +145,7 @@ Use this demo when your application receives raw I420 frames. The inference path
 - 显式执行一次完整 warmup。
 - 执行指定次数的测量 loop，并打印阶段级耗时。
 - 仅为了最终画框，在 host 上将同一帧 YUV 转为 BGR 可视化图片。
-- 在开启 `YOLO_ENABLE_RPP_PERF=ON` 构建时，可通过 `-p` 或 `--perf` 保存 `rpp_perf` trace。
+- 在开启 `YOLO_ENABLE_RPP_PERF=ON` 构建时，自动保存 `rpp_perf` trace。
 
 ## 构建
 
@@ -157,7 +162,7 @@ make -j8
 可执行文件生成路径：
 
 ```text
-build/bin/yolov5_yuv_image_demo
+build/bin/yolov5_yuv_frame_demo
 ```
 
 ## 运行
@@ -166,7 +171,7 @@ build/bin/yolov5_yuv_image_demo
 
 ```shell
 cd build/bin
-./yolov5_yuv_image_demo -o ../../onnx/yolov5s.onnx
+./yolov5_yuv_frame_demo -o ../../onnx/yolov5s.onnx
 ```
 
 默认输入是构建时复制的示例帧：
@@ -180,7 +185,7 @@ cd build/bin
 使用其他 I420 输入帧：
 
 ```shell
-./yolov5_yuv_image_demo \
+./yolov5_yuv_frame_demo \
   -o /path/to/yolov5.onnx \
   --yuv /path/to/frame.i420 \
   --yuv-width 1280 \
@@ -196,9 +201,6 @@ cd build/bin
 --yuv-height     I420 帧高。默认：720
 --output         绘制检测框后的输出图片路径。默认：../output/output_yuv.jpg
 -l, --loop       warmup 之后的测量 loop 次数。默认：1
--p, --perf       在项目使用 YOLO_ENABLE_RPP_PERF=ON 构建时保存 rpp_perf trace JSON。
-                 非 perf 构建中使用该参数时，demo 会打印提示并继续执行，不保存 trace。
---perf-dir       trace 输出目录。默认：../trace
 -v, --verbose    开启更详细的运行时日志。
 ```
 
@@ -214,7 +216,7 @@ cd build/bin
 在 host 上生成用于画框的 BGR 可视化帧
         |
         v
-创建可选 perf trace 会话
+perf 构建中创建 trace 会话
         |
         v
 初始化 YoloV5Pipeline 和 RppInferEngine

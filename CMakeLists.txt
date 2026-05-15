@@ -72,7 +72,7 @@ target_include_directories(perf_trace PRIVATE
 )
 target_link_libraries(perf_trace PRIVATE pthread)
 if(YOLO_ENABLE_RPP_PERF)
-    target_compile_definitions(perf_trace PRIVATE YOLO_ENABLE_RPP_PERF=1)
+    target_compile_definitions(perf_trace PUBLIC YOLO_ENABLE_RPP_PERF=1)
     target_compile_options(perf_trace PRIVATE -Wno-c99-designator)
     target_link_libraries(perf_trace PRIVATE rpp_perf urpp)
 endif()
@@ -165,7 +165,7 @@ set_target_properties(yolov5_visualization PROPERTIES
 )
 
 add_executable(yolov5_rgb_image_demo
-    ${ROOT_DIRECTORY}/demos/rgb_image_single_process/main.cpp
+    ${ROOT_DIRECTORY}/demos/rgb_image/main.cpp
 )
 target_include_directories(yolov5_rgb_image_demo PRIVATE
     ${ThirdPartyLib_Include}
@@ -175,14 +175,14 @@ set_target_properties(yolov5_rgb_image_demo PROPERTIES
     BUILD_RPATH "$ORIGIN/../lib;${RppRT_LIBS}"
 )
 
-add_executable(yolov5_yuv_image_demo
-    ${ROOT_DIRECTORY}/demos/yuv_image_single_process/main.cpp
+add_executable(yolov5_yuv_frame_demo
+    ${ROOT_DIRECTORY}/demos/yuv_frame/main.cpp
 )
-target_include_directories(yolov5_yuv_image_demo PRIVATE
+target_include_directories(yolov5_yuv_frame_demo PRIVATE
     ${ThirdPartyLib_Include}
 )
-target_link_libraries(yolov5_yuv_image_demo PRIVATE yolov5_core yolov5_visualization)
-set_target_properties(yolov5_yuv_image_demo PROPERTIES
+target_link_libraries(yolov5_yuv_frame_demo PRIVATE yolov5_core yolov5_visualization)
+set_target_properties(yolov5_yuv_frame_demo PROPERTIES
     BUILD_RPATH "$ORIGIN/../lib;${RppRT_LIBS}"
 )
 

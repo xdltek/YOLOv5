@@ -1,4 +1,8 @@
+<a id="english"></a>
+
 # RPP Acceleration Modules
+
+Language: [English](#english) | [中文](#chinese)
 
 This directory contains the hardware-facing acceleration layer used by the YOLOv5 demos. It wraps RppRT inference, RPP preprocessing kernels, and RPP postprocessing kernels behind reusable C++ interfaces.
 
@@ -67,7 +71,7 @@ Demos print stage-level timing:
 Input H2D -> Preprocess -> Inference -> Postprocess -> Output D2H
 ```
 
-The RPP modules expose these timings through their result structures. More detailed device-side events are captured by `rpp_perf` when the project is built with `YOLO_ENABLE_RPP_PERF=ON` and the demo is launched with `-p` or `--perf`.
+The RPP modules expose these timings through their result structures. More detailed device-side events are captured by `rpp_perf` when the project is built with `YOLO_ENABLE_RPP_PERF=ON`.
 
 ## Reuse Guidance
 
@@ -94,7 +98,11 @@ For a non-YOLO model:
 
 ---
 
+<a id="chinese"></a>
+
 # RPP 加速模块
+
+语言：[English](#english) | [中文](#chinese)
 
 本目录包含 YOLOv5 demo 使用的硬件侧加速层。它通过可复用的 C++ 接口封装了 RppRT 推理、RPP 前处理 kernel 和 RPP 后处理 kernel。
 
@@ -163,7 +171,7 @@ demo 打印阶段级耗时：
 Input H2D -> Preprocess -> Inference -> Postprocess -> Output D2H
 ```
 
-RPP 模块通过各自的结果结构暴露这些耗时。更细粒度的 device 侧事件由 `rpp_perf` 捕获：项目需要使用 `YOLO_ENABLE_RPP_PERF=ON` 构建，并在运行 demo 时添加 `-p` 或 `--perf`。
+RPP 模块通过各自的结果结构暴露这些耗时。更细粒度的 device 侧事件由 `rpp_perf` 捕获：项目需要使用 `YOLO_ENABLE_RPP_PERF=ON` 构建。
 
 ## 复用建议
 
