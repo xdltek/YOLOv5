@@ -2,4 +2,6 @@
 .cursor/
 build/
 onnx/
-
+*.onnx
+*.o
+*.jpg
