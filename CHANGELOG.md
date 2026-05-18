@@ -9,6 +9,7 @@ All notable changes from this point forward should be recorded in this file.
 - Optimized the I420 YUV preprocessing path with the same zero-kernel plus content-region launch strategy used by RGB/BGR preprocessing.
 - Optimized RPP postprocessing scheduling by removing intermediate stream synchronizations between cast, pre-slice, and NMS.
 - Clarified postprocess output D2H timing by synchronizing RPP device postprocess work before measuring result copies back to host.
+- Updated preprocessing SRAM workspace management to use `rtMallocVirtSram`/`rtFreeVirtSram`, allowing preprocessing workspace to remain allocated through postprocessing.
 
 ## [v2.0]
 

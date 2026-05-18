@@ -269,7 +269,7 @@ bool YoloV5Pipeline::runInput(const void* data,
                                 &preprocess_profile)) {
             return false;
         }
-        preprocessor_->releaseSramBuffers();
+        // Keep preprocessing virtual SRAM workspace alive; it does not block postprocess SRAM allocation.
     }
     auto preprocess_stop = std::chrono::high_resolution_clock::now();
     local_times.preprocess_ms = preprocess_profile.total_ms > 0.0 ?
