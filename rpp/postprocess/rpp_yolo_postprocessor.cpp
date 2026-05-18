@@ -554,12 +554,6 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
         }
         return false;
     }
-    if (!check_rt(rtStreamSynchronize(run_stream), "rtStreamSynchronize RPP postprocess cast")) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
-        return false;
-    }
     if (profile != nullptr) {
         profile->cast_ms = elapsed_ms(stage_start);
     }
@@ -576,12 +570,6 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
     }
     catch (const std::exception& e) {
         std::cerr << "RPP nms_pre_slice failed: " << e.what() << std::endl;
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
-        return false;
-    }
-    if (!check_rt(rtStreamSynchronize(run_stream), "rtStreamSynchronize RPP nms_pre_slice")) {
         if (owns_stream) {
             rtStreamDestroy(run_stream);
         }
@@ -612,15 +600,17 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
             }
             return false;
         }
-        if (!check_rt(rtStreamSynchronize(run_stream), "rtStreamSynchronize RPP NMS")) {
-            if (owns_stream) {
-                rtStreamDestroy(run_stream);
-            }
-            return false;
-        }
     }
     catch (const std::exception& e) {
         std::cerr << "RPP NMS failed: " << e.what() << std::endl;
+        if (owns_stream) {
+            rtStreamDestroy(run_stream);
+        }
+        return false;
+    }
+    // Complete all queued device postprocess work before measuring D2H. This keeps the
+    // stdout Output D2H field from absorbing cast, slice, and NMS wait time.
+    if (!check_rt(rtStreamSynchronize(run_stream), "rtStreamSynchronize RPP postprocess device work")) {
         if (owns_stream) {
             rtStreamDestroy(run_stream);
         }
@@ -630,7 +620,7 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
         profile->nms_ms = elapsed_ms(stage_start);
     }
 
-    // Copy only the compact NMS result and the BF16 box table needed for final drawing.
+    // Queue D2H after device postprocess work has completed, then synchronize only the D2H tail.
     int max_selected = nms_indices_elements_ / nms_index_tuple_size_;
     const size_t nms_indices_bytes = static_cast<size_t>(nms_indices_elements_) * sizeof(int32_t);
 

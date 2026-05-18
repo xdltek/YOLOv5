@@ -2,6 +2,14 @@
 
 All notable changes from this point forward should be recorded in this file.
 
+## [Unreleased]
+
+### Changed
+- Optimized the RGB/BGR preprocessing path by clearing the model tensor with a zero kernel and launching resize/normalize only over the letterbox content region, including vertical and horizontal padding cases.
+- Optimized the I420 YUV preprocessing path with the same zero-kernel plus content-region launch strategy used by RGB/BGR preprocessing.
+- Optimized RPP postprocessing scheduling by removing intermediate stream synchronizations between cast, pre-slice, and NMS.
+- Clarified postprocess output D2H timing by synchronizing RPP device postprocess work before measuring result copies back to host.
+
 ## [v2.0]
 
 ### Added

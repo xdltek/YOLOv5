@@ -1,7 +1,9 @@
 .cache/
 .cursor/
 build/
+report/
 onnx/
 *.onnx
 *.o
 *.jpg
+!assets/ultralytics_*.jpg
