@@ -86,27 +86,27 @@ RppYoloPreprocessor::~RppYoloPreprocessor()
         rtFreeHost(host_input_pinned_);
         host_input_pinned_ = nullptr;
     }
-    releaseVirtualSramBuffers();
+    releaseSramBuffers();
 }
 
 /**
- * @brief Release virtual SRAM workspace owned by preprocessing.
+ * @brief Release SRAM workspace owned by preprocessing.
  */
-void RppYoloPreprocessor::releaseVirtualSramBuffers()
+void RppYoloPreprocessor::releaseSramBuffers()
 {
-    // Virtual SRAM workspace can stay alive through postprocess and is released with the preprocessor.
+    // SRAM is temporary workspace; release it after preprocessing so postprocess can allocate its own workspace.
     if (input_sram_ != nullptr) {
-        rtFreeVirtSram(input_sram_);
+        rtFreeSram(input_sram_);
         input_sram_ = nullptr;
         input_sram_capacity_ = 0;
     }
     if (rgb_chw_sram_ != nullptr) {
-        rtFreeVirtSram(rgb_chw_sram_);
+        rtFreeSram(rgb_chw_sram_);
         rgb_chw_sram_ = nullptr;
         rgb_chw_sram_capacity_ = 0;
     }
     if (model_input_sram_ != nullptr) {
-        rtFreeVirtSram(model_input_sram_);
+        rtFreeSram(model_input_sram_);
         model_input_sram_ = nullptr;
         model_input_sram_capacity_ = 0;
     }
@@ -173,9 +173,9 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
     }
     auto preprocess_start = ProfileClock::now();
 
-    // Move input DDR into virtual SRAM because the RPP kernels operate on SRAM workspace.
+    // Move input DDR into SRAM because the RPP kernels operate on temporary SRAM workspace.
     size_t input_bytes = rpp_preprocess_input_bytes(input.format, input.width, input.height);
-    if (!ensureVirtualSramBuffer(&input_sram_, &input_sram_capacity_, input_bytes)) {
+    if (!ensureSramBuffer(&input_sram_, &input_sram_capacity_, input_bytes)) {
         if (owns_stream) {
             rtStreamDestroy(run_stream);
         }
@@ -195,7 +195,7 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
                                static_cast<size_t>(model_height_) *
                                3U *
                                sizeof(float);
-    if (!ensureVirtualSramBuffer(&model_input_sram_, &model_input_sram_capacity_, model_input_bytes)) {
+    if (!ensureSramBuffer(&model_input_sram_, &model_input_sram_capacity_, model_input_bytes)) {
         if (owns_stream) {
             rtStreamDestroy(run_stream);
         }
@@ -340,11 +340,11 @@ bool RppYoloPreprocessor::ensureHostPinnedBuffer(void** buffer, size_t* capacity
 }
 
 /**
- * @brief Grow or reuse a virtual SRAM workspace buffer for RPP kernels.
+ * @brief Grow or reuse an SRAM workspace buffer for RPP kernels.
  */
-bool RppYoloPreprocessor::ensureVirtualSramBuffer(void** buffer, size_t* capacity, size_t required_bytes)
+bool RppYoloPreprocessor::ensureSramBuffer(void** buffer, size_t* capacity, size_t required_bytes)
 {
-    // Virtual SRAM buffers are resized lazily because source image size can change between runs.
+    // SRAM buffers are resized lazily because source image size can change between runs.
     if (buffer == nullptr || capacity == nullptr || required_bytes == 0) {
         return false;
     }
@@ -352,13 +352,13 @@ bool RppYoloPreprocessor::ensureVirtualSramBuffer(void** buffer, size_t* capacit
         return true;
     }
     if (*buffer != nullptr) {
-        if (!check_rt(rtFreeVirtSram(*buffer), "rtFreeVirtSram")) {
+        if (!check_rt(rtFreeSram(*buffer), "rtFreeSram")) {
             return false;
         }
         *buffer = nullptr;
         *capacity = 0;
     }
-    if (!check_rt(rtMallocVirtSram(buffer, required_bytes), "rtMallocVirtSram")) {
+    if (!check_rt(rtMallocSram(buffer, required_bytes), "rtMallocSram")) {
         return false;
     }
     *capacity = required_bytes;

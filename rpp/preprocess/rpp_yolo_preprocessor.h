@@ -103,9 +103,9 @@ public:
              RppPreprocessProfile* profile = nullptr);
 
     /**
-     * @brief Release virtual SRAM buffers owned by preprocessing.
+     * @brief Release SRAM buffers owned by preprocessing.
      */
-    void releaseVirtualSramBuffers();
+    void releaseSramBuffers();
 
 private:
     /**
@@ -123,12 +123,12 @@ private:
      */
     bool ensureHostPinnedBuffer(void** buffer, size_t* capacity, size_t required_bytes);
     /**
-     * @brief Ensure a reusable virtual SRAM workspace buffer has at least the requested capacity.
+     * @brief Ensure a reusable SRAM workspace buffer has at least the requested capacity.
      * @param buffer Buffer pointer updated when allocation changes.
      * @param capacity Current capacity updated on allocation.
      * @param required_bytes Required byte count.
      */
-    bool ensureVirtualSramBuffer(void** buffer, size_t* capacity, size_t required_bytes);
+    bool ensureSramBuffer(void** buffer, size_t* capacity, size_t required_bytes);
     /**
      * @brief Copy host input into device DDR, or pass through an existing device pointer.
      * @param input Source input descriptor.
