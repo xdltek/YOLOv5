@@ -52,7 +52,7 @@ Successful execution should print warmup-stable stage timing and FPS, and genera
 - [`rpp/`](rpp/README.md)
   RPP/RppRT hardware-facing modules, including runtime inference, preprocessing kernels/modules, and postprocessing.
 - `demos/`
-  Executable demo entries, including RGB image and I420 YUV image demos.
+  Executable demo entries, including RGB image, RGB image sequence, and I420 YUV frame demos.
 - `assets/`
   Source sample image and I420 frame copied into `build/assets/` for quick verification.
 - `3rd_party/`
@@ -65,6 +65,7 @@ This repository does **not** bundle ONNX models. Class names for overlays are th
 The root README explains the shared build and architecture. Each executable has its own guide with its input format, command-line options, workflow, and expected output:
 
 - [RGB image demo](demos/rgb_image/README.md)
+- [RGB image sequence demo](demos/rgb_image_sequence/README.md)
 - [I420 YUV frame demo](demos/yuv_frame/README.md)
 
 ## Prerequisites
@@ -96,6 +97,7 @@ After the build completes successfully, the executable should be available at:
 
 ```shell
 build/bin/yolov5_rgb_image_demo
+build/bin/yolov5_rgb_image_sequence_demo
 build/bin/yolov5_yuv_frame_demo
 ```
 
@@ -116,12 +118,14 @@ Run demos from `build/bin` after building the project. **`--onnx` is required** 
 ```shell
 cd build/bin
 ./yolov5_rgb_image_demo -o ../../onnx/yolov5s.onnx
+./yolov5_rgb_image_sequence_demo -o ../../onnx/yolov5s.onnx --image-dir ../assets
 ./yolov5_yuv_frame_demo -o ../../onnx/yolov5s.onnx
 ```
 
 For full command-line options and expected output, see the per-demo guides:
 
 - [RGB image demo](demos/rgb_image/README.md)
+- [RGB image sequence demo](demos/rgb_image_sequence/README.md)
 - [I420 YUV frame demo](demos/yuv_frame/README.md)
 
 ## Code Execution Workflow
@@ -179,6 +183,8 @@ For full command-line options and expected output, see the per-demo guides:
   Optional rpp_perf trace wrapper used automatically when the project is built with `-DYOLO_ENABLE_RPP_PERF=ON`.
 - `demos/rgb_image/main.cpp`
   RGB/BGR image demo entry point.
+- `demos/rgb_image_sequence/main.cpp`
+  Single-process RGB/BGR image sequence demo entry point.
 - `demos/yuv_frame/main.cpp`
   I420 YUV frame demo entry point.
 
@@ -252,7 +258,7 @@ cd bin
 - [`rpp/`](rpp/README.md)
   面向 RPP/RppRT 硬件执行路径的模块，包括运行时推理、前处理 kernel/模块和后处理模块。
 - `demos/`
-  demo 可执行入口，包括 RGB 图片和 I420 YUV 帧 demo。
+  demo 可执行入口，包括 RGB 图片、RGB 图片序列和 I420 YUV 帧 demo。
 - `assets/`
   示例输入资源，构建时会复制到 `build/assets/`，便于快速验证。
 - `3rd_party/`
@@ -265,6 +271,7 @@ cd bin
 根 README 说明公共构建方式和整体架构。每个 demo 目录下还有独立说明文档，用于描述对应输入格式、命令行参数、执行流程和输出结果：
 
 - [RGB 图片 demo](demos/rgb_image/README.md)
+- [RGB 图片序列 demo](demos/rgb_image_sequence/README.md)
 - [I420 YUV 帧 demo](demos/yuv_frame/README.md)
 
 ## 环境依赖
@@ -296,6 +303,7 @@ make -j8
 
 ```shell
 build/bin/yolov5_rgb_image_demo
+build/bin/yolov5_rgb_image_sequence_demo
 build/bin/yolov5_yuv_frame_demo
 ```
 
@@ -316,12 +324,14 @@ build/trace/    可选的 rpp_perf trace 文件
 ```shell
 cd build/bin
 ./yolov5_rgb_image_demo -o ../../onnx/yolov5s.onnx
+./yolov5_rgb_image_sequence_demo -o ../../onnx/yolov5s.onnx --image-dir ../assets
 ./yolov5_yuv_frame_demo -o ../../onnx/yolov5s.onnx
 ```
 
 完整参数和预期输出请参考各 demo 文档：
 
 - [RGB 图片 demo](demos/rgb_image/README.md)
+- [RGB 图片序列 demo](demos/rgb_image_sequence/README.md)
 - [I420 YUV 帧 demo](demos/yuv_frame/README.md)
 
 ## 代码执行流程
@@ -376,6 +386,8 @@ cd build/bin
   使用 `-DYOLO_ENABLE_RPP_PERF=ON` 构建时自动启用的可选 rpp_perf trace 封装。
 - `demos/rgb_image/main.cpp`
   RGB/BGR 图片 demo 入口。
+- `demos/rgb_image_sequence/main.cpp`
+  单进程 RGB/BGR 图片序列 demo 入口。
 - `demos/yuv_frame/main.cpp`
   I420 YUV 帧 demo 入口。
 

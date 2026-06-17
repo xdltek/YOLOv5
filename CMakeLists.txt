@@ -175,6 +175,17 @@ set_target_properties(yolov5_rgb_image_demo PROPERTIES
     BUILD_RPATH "$ORIGIN/../lib;${RppRT_LIBS}"
 )
 
+add_executable(yolov5_rgb_image_sequence_demo
+    ${ROOT_DIRECTORY}/demos/rgb_image_sequence/main.cpp
+)
+target_include_directories(yolov5_rgb_image_sequence_demo PRIVATE
+    ${ThirdPartyLib_Include}
+)
+target_link_libraries(yolov5_rgb_image_sequence_demo PRIVATE yolov5_core yolov5_visualization)
+set_target_properties(yolov5_rgb_image_sequence_demo PROPERTIES
+    BUILD_RPATH "$ORIGIN/../lib;${RppRT_LIBS}"
+)
+
 add_executable(yolov5_yuv_frame_demo
     ${ROOT_DIRECTORY}/demos/yuv_frame/main.cpp
 )

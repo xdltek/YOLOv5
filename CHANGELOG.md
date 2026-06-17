@@ -4,6 +4,9 @@ All notable changes from this point forward should be recorded in this file.
 
 ## [Unreleased]
 
+### Added
+- Added `yolov5_rgb_image_sequence_demo` for single-process sequential RGB/BGR image inference while reusing one YOLOv5 pipeline instance.
+
 ### Changed
 - Optimized the RGB/BGR preprocessing path by clearing the model tensor with a zero kernel and launching resize/normalize only over the letterbox content region, including vertical and horizontal padding cases.
 - Optimized the I420 YUV preprocessing path with the same zero-kernel plus content-region launch strategy used by RGB/BGR preprocessing.
