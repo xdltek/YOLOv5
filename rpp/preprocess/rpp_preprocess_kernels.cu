@@ -21,22 +21,31 @@ __global__ void letterbox_resize_norm_i420_kernel(const unsigned char* y_base,
                                                   int resized_width,
                                                   int resized_height,
                                                   int pad_left,
-                                                  int pad_top)
+                                                  int pad_top,
+                                                  int content_only)
 {
     // Each launch lane writes one output pixel for one NCHW channel.
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int c = blockIdx.z;
-    int rel_x = x - pad_left;
-    int rel_y = y - pad_top;
-    short inside = static_cast<short>((rel_x >= 0) & (rel_x < resized_width) &
-                                      (rel_y >= 0) & (rel_y < resized_height));
 
-    // Clamp sampling coordinates so padding lanes never read outside the source frame.
+    // Content-only launches already point at the top-left model tensor content offset.
+    // This scalar branch removes padding predicates from the common optimized path.
     float scale_x = static_cast<float>(input_width) / static_cast<float>(resized_width);
     float scale_y = static_cast<float>(input_height) / static_cast<float>(resized_height);
-    int sample_x = rpp_min(rpp_max(rel_x, 0), resized_width - 1);
-    int sample_y = rpp_min(rpp_max(rel_y, 0), resized_height - 1);
+    int sample_x = x;
+    int sample_y = y;
+    short inside = 1;
+    if (content_only == 0) {
+        int rel_x = x - pad_left;
+        int rel_y = y - pad_top;
+        inside = static_cast<short>((rel_x >= 0) & (rel_x < resized_width) &
+                                    (rel_y >= 0) & (rel_y < resized_height));
+        // Clamp sampling coordinates so padding lanes never read outside the source frame.
+        sample_x = rpp_min(rpp_max(rel_x, 0), resized_width - 1);
+        sample_y = rpp_min(rpp_max(rel_y, 0), resized_height - 1);
+    }
+
     int sx = static_cast<int>((static_cast<float>(sample_x) + 0.5f) * scale_x);
     int sy = static_cast<int>((static_cast<float>(sample_y) + 0.5f) * scale_y);
     sx = rpp_min(rpp_max(sx, 0), input_width - 1);
@@ -69,6 +78,19 @@ __global__ void letterbox_resize_norm_i420_kernel(const unsigned char* y_base,
     float normalized = rpp_select(0.0f, resized_value, inside);
     int dst_idx = c * output_width * output_height + y * output_width + x;
     output[dst_idx] = normalized;
+}
+
+/**
+ * @brief Clear one NCHW float tensor before a content-only launch fills the resized area.
+ */
+__global__ void zero_nchw_f32_kernel(float* output, int output_width, int output_height)
+{
+    // Launch geometry covers the full model tensor, so every lane performs one valid store.
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y;
+    int c = blockIdx.z;
+    int dst_idx = c * output_width * output_height + y * output_width + x;
+    output[dst_idx] = 0.0f;
 }
 
 /**
@@ -187,6 +209,37 @@ void launch_letterbox_resize_norm_i420_to_nchw_f32(rtStream_t stream,
     blocksPerGrid.y = output_height;
     blocksPerGrid.z = 3;
 
+    // Fast path: clear the full model tensor once, then launch resize only over the content region.
+    // Padding lanes are already zero, so the I420 kernel does not spend work on letterbox borders.
+    if (resized_width > 0 && resized_height > 0 && output_width <= 8191 && resized_width <= 8191) {
+        zero_nchw_f32_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
+            output,
+            output_width,
+            output_height);
+
+        threadsPerBlock.x = resized_width;
+        blocksPerGrid.y = resized_height;
+        float* content_output = output +
+                                static_cast<size_t>(pad_top) * static_cast<size_t>(output_width) +
+                                static_cast<size_t>(pad_left);
+
+        letterbox_resize_norm_i420_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
+            y_base,
+            u_base,
+            v_base,
+            input_width,
+            input_height,
+            content_output,
+            output_width,
+            output_height,
+            resized_width,
+            resized_height,
+            0,
+            0,
+            1);
+        return;
+    }
+
     letterbox_resize_norm_i420_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
         y_base,
         u_base,
@@ -199,7 +252,8 @@ void launch_letterbox_resize_norm_i420_to_nchw_f32(rtStream_t stream,
         resized_width,
         resized_height,
         pad_left,
-        pad_top);
+        pad_top,
+        0);
 }
 
 /**
@@ -232,6 +286,34 @@ void launch_letterbox_resize_norm_hwc_u8_to_nchw_f32(rtStream_t stream,
     blocksPerGrid.x = 1;
     blocksPerGrid.y = output_height;
     blocksPerGrid.z = 3;
+
+    if (resized_width > 0 && resized_height > 0 && output_width <= 8191 && resized_width <= 8191) {
+        zero_nchw_f32_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
+            output,
+            output_width,
+            output_height);
+
+        threadsPerBlock.x = resized_width;
+        blocksPerGrid.y = resized_height;
+        float* content_output = output +
+                                static_cast<size_t>(pad_top) * static_cast<size_t>(output_width) +
+                                static_cast<size_t>(pad_left);
+
+        letterbox_resize_norm_hwc_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
+            static_cast<const unsigned char*>(input),
+            input_width,
+            input_height,
+            input_is_bgr ? 2 : 0,
+            input_is_bgr ? -1 : 1,
+            content_output,
+            output_width,
+            output_height,
+            resized_width,
+            resized_height,
+            0,
+            0);
+        return;
+    }
 
     letterbox_resize_norm_hwc_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
         static_cast<const unsigned char*>(input),

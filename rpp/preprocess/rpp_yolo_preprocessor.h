@@ -103,7 +103,7 @@ public:
              RppPreprocessProfile* profile = nullptr);
 
     /**
-     * @brief Release temporary SRAM buffers so later stages can reuse accelerator SRAM.
+     * @brief Release SRAM buffers owned by preprocessing.
      */
     void releaseSramBuffers();
 

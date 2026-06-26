@@ -90,7 +90,7 @@ RppYoloPreprocessor::~RppYoloPreprocessor()
 }
 
 /**
- * @brief Release SRAM workspace used by the latest preprocessing run.
+ * @brief Release SRAM workspace owned by preprocessing.
  */
 void RppYoloPreprocessor::releaseSramBuffers()
 {
