@@ -24,15 +24,31 @@ namespace sample
 {
     using Severity = infer1::ILogger::Severity;
 
+    /**
+     * @brief Return the optional file path used by stream-style logging.
+     */
     const std::string& get_log_file_path();
-    void set_log_file_path_111(const std::string& path);
+    /**
+     * @brief Set the optional file path used by stream-style logging.
+     * @param path Destination log file path.
+     */
+    void set_log_file_path(const std::string& path);
 
+    /**
+     * @brief Forward declaration for the global RppRT-compatible logger.
+     */
     class Logger;
     extern Logger gLogger;
 
+    /**
+     * @brief Stream buffer that formats one log line and mirrors it to an optional log file.
+     */
     class LogStreamConsumerBuffer : public std::stringbuf
     {
     public:
+        /**
+         * @brief Construct a formatting buffer for one severity-prefixed stream.
+         */
         LogStreamConsumerBuffer(std::ostream& stream, const std::string& prefix, bool shouldLog)
                 : mOutput(stream)
                 , mPrefix(prefix)
@@ -40,39 +56,45 @@ namespace sample
         {
         }
 
+        /**
+         * @brief Move a temporary stream buffer while keeping the output stream reference valid.
+         */
         LogStreamConsumerBuffer(LogStreamConsumerBuffer&& other)
                 : mOutput(other.mOutput)
         {
         }
 
+        /**
+         * @brief Flush any pending text before the buffer is destroyed.
+         */
         ~LogStreamConsumerBuffer()
         {
-            // std::streambuf::pbase() gives a pointer to the beginning of the buffered part of the output sequence
-            // std::streambuf::pptr() gives a pointer to the current position of the output sequence
-            // if the pointer to the beginning is not equal to the pointer to the current position,
-            // call putOutput() to log the output to the stream
+            // Flush any buffered text when a temporary log stream goes out of scope.
             if (pbase() != pptr())
             {
                 putOutput();
             }
         }
 
-        // synchronizes the stream buffer and returns 0 on success
-        // synchronizing the stream buffer consists of inserting the buffer contents into the stream,
-        // resetting the buffer and flushing the stream
+        /**
+         * @brief Flush buffered log text into the target stream.
+         */
         virtual int sync()
         {
             putOutput();
             return 0;
         }
 
+        /**
+         * @brief Add timestamp/severity metadata and write buffered text to console and optional file.
+         */
         void putOutput()
         {
             if (mShouldLog)
             {
                 std::string log_text = str();
 
-                // prepend timestamp
+                // Prepend a timestamp so runtime messages can be correlated with demo stages.
                 std::time_t timestamp = std::time(nullptr);
                 tm* tm_local = std::localtime(&timestamp);
                 mOutput << "[";
@@ -82,8 +104,7 @@ namespace sample
                 mOutput << std::setw(2) << std::setfill('0') << tm_local->tm_hour << ":";
                 mOutput << std::setw(2) << std::setfill('0') << tm_local->tm_min << ":";
                 mOutput << std::setw(2) << std::setfill('0') << tm_local->tm_sec << "] ";
-                // std::stringbuf::str() gets the string contents of the buffer
-                // insert the buffer contents pre-appended by the appropriate prefix into the stream
+                // Write the severity-prefixed message to console and optional file.
                 mOutput << mPrefix << log_text;
 
                 const std::string& log_file = get_log_file_path();
@@ -100,13 +121,15 @@ namespace sample
                     file_stream.close();
                 }
 
-                // set the buffer to empty
+                // Reset the buffer so subsequent stream writes start fresh.
                 str("");
-                // flush the stream
                 mOutput.flush();
             }
         }
 
+        /**
+         * @brief Enable or disable output for this cached stream buffer.
+         */
         void setShouldLog(bool shouldLog)
         {
             mShouldLog = shouldLog;
@@ -118,13 +141,15 @@ namespace sample
         bool mShouldLog;
     };
 
-    //!
-    //! \class LogStreamConsumerBase
-    //! \brief Convenience object used to initialize LogStreamConsumerBuffer before std::ostream in LogStreamConsumer
-    //!
+    /**
+     * @brief Base object that initializes LogStreamConsumerBuffer before std::ostream.
+     */
     class LogStreamConsumerBase
     {
     public:
+        /**
+         * @brief Construct the stream buffer before std::ostream receives its address.
+         */
         LogStreamConsumerBase(std::ostream& stream, const std::string& prefix, bool shouldLog)
                 : mBuffer(stream, prefix, shouldLog)
         {
@@ -134,20 +159,20 @@ namespace sample
         LogStreamConsumerBuffer mBuffer;
     };
 
-    //!
-    //! \class LogStreamConsumer
-    //! \brief Convenience object used to facilitate use of C++ stream syntax when logging messages.
-    //!  Order of base classes is LogStreamConsumerBase and then std::ostream.
-    //!  This is because the LogStreamConsumerBase class is used to initialize the LogStreamConsumerBuffer member field
-    //!  in LogStreamConsumer and then the address of the buffer is passed to std::ostream.
-    //!  This is necessary to prevent the address of an uninitialized buffer from being passed to std::ostream.
-    //!  Please do not change the order of the parent classes.
-    //!
+    /**
+     * @brief Stream facade that lets callers write log messages with C++ stream syntax.
+     *
+     * LogStreamConsumerBase must appear before std::ostream in the base-class list so
+     * the stream buffer is constructed before it is passed to std::ostream.
+     */
     class LogStreamConsumer : protected LogStreamConsumerBase, public std::ostream
     {
     public:
-        //! \brief Creates a LogStreamConsumer which logs messages with level severity.
-        //!  Reportable severity determines if the messages are severe enough to be logged.
+        /**
+         * @brief Create a stream that emits messages when severity is reportable.
+         * @param reportableSeverity Maximum verbosity allowed by the logger.
+         * @param severity Severity of this individual log stream.
+         */
         LogStreamConsumer(Severity reportableSeverity, Severity severity)
                 : LogStreamConsumerBase(severityOstream(severity), severityPrefix(severity), severity <= reportableSeverity)
                 , std::ostream(&mBuffer) // links the stream buffer with the stream
@@ -156,6 +181,9 @@ namespace sample
         {
         }
 
+        /**
+         * @brief Move a temporary stream while preserving its severity and output target.
+         */
         LogStreamConsumer(LogStreamConsumer&& other)
                 : LogStreamConsumerBase(severityOstream(other.mSeverity), severityPrefix(other.mSeverity), other.mShouldLog)
                 , std::ostream(&mBuffer) // links the stream buffer with the stream
@@ -164,22 +192,30 @@ namespace sample
         {
         }
 
+        /**
+         * @brief Update whether this cached stream should emit after logger verbosity changes.
+         */
         void setReportableSeverity(Severity reportableSeverity)
         {
+            // Cached streams must recompute the filter because their severity is fixed at construction.
             mShouldLog = mSeverity <= reportableSeverity;
             mBuffer.setShouldLog(mShouldLog);
         }
 
     private:
+        /**
+         * @brief Choose stdout or stderr for a severity.
+         */
         static std::ostream& severityOstream(Severity severity)
         {
             return severity >= Severity::kINFO ? std::cout : std::cerr;
         }
 
+        /**
+         * @brief Convert a severity into the short prefix used by log lines.
+         */
         static std::string severityPrefix(Severity severity)
         {
-            // return "";
-
             switch (severity)
             {
                 case Severity::kINTERNAL_ERROR: return "[F] ";
@@ -195,97 +231,77 @@ namespace sample
         Severity mSeverity;
     };
 
-    //! \class Logger
-    //!
-    //! \brief Class which manages logging of TensorRT tools and samples
-    //!
-    //! \details This class provides a common interface for TensorRT tools and samples to log information to the console, and
-    //! supports logging two types of messages:
-    //!
-    //! - Debugging messages with an associated severity (info, warning, error, or internal error/fatal)
-    //! - Test pass/fail messages
-    //!
-    //! The advantage of having all samples use this class for logging as opposed to emitting directly to stdout/stderr is that
-    //! the logic for controlling the verbosity and formatting of sample output is centralized in one location.
-    //!
-    //! In the future, this class could be extended to support dumping test results to a file in some standard format
-    //! (for example, JUnit XML), and providing additional metadata (e.g. timing the duration of a test run).
-    //!
-    //! TODO: For backwards compatibility with existing samples, this class inherits directly from the infer1::ILogger interface,
-    //! which is problematic since there isn't a clean separation between messages coming from the TensorRT library and messages coming
-    //! from the sample.c
-    //!
-    //! In the future (once all samples are updated to use Logger::getTRTLogger() to access the ILogger) we can refactor the class
-    //! to eliminate the inheritance and instead make the infer1::ILogger implementation a member of the Logger object.
-
+    /**
+     * @brief Shared logger used by RppRT builders, parsers, and demo helper code.
+     *
+     * The class keeps direct infer1::ILogger inheritance so OpenRT/RppRT APIs can
+     * use the same logger instance as the demo command-line tools.
+     */
     class Logger : public infer1::ILogger
     {
     public:
+        /**
+         * @brief Construct a logger with the requested reportable severity.
+         */
         Logger(Severity severity = Severity::kVERBOSE)
                 : mReportableSeverity(severity)
         {
         }
 
-        //!
-        //! \enum TestResult
-        //! \brief Represents the state of a given test
-        //!
+        /**
+         * @brief Lifecycle state used by legacy sample-style test reporting helpers.
+         */
         enum class TestResult
         {
-            kRUNNING, //!< The test is running
-            kPASSED,  //!< The test passed
-            kFAILED,  //!< The test failed
-            kWAIVED   //!< The test was waived
+            kRUNNING, // The test is running.
+            kPASSED,  // The test passed.
+            kFAILED,  // The test failed.
+            kWAIVED   // The test was waived.
         };
 
-        //!
-        //! \brief Forward-compatible method for retrieving the nvinfer::ILogger associated with this Logger
-        //! \return The infer1::ILogger associated with this Logger
-        //!
-        //! TODO Once all samples are updated to use this method to register the logger with TensorRT,
-        //! we can eliminate the inheritance of Logger from ILogger
-        //!
+        /**
+         * @brief Return the infer1::ILogger interface required by RppRT APIs.
+         */
         infer1::ILogger& getLogger()
         {
             return *this;
         }
 
-        //!
-        //! \brief Implementation of the infer1::ILogger::log() virtual method
-        //!
-        //! Note samples should not be calling this function directly; it will eventually go away once we eliminate the inheritance from
-        //! infer1::ILogger
-        //!
+        /**
+         * @brief Receive runtime log messages from RppRT and forward them through stream logging.
+         */
         void log(Severity severity, const char* msg) override
         {
+            // Preserve runtime-origin context so parser/build errors are distinguishable from demo messages.
             LogStreamConsumer(mReportableSeverity, severity) << "[OpenRT] " << std::string(msg) << std::endl;
         }
 
-        //!
-        //! \brief Method for controlling the verbosity of logging output
-        //!
-        //! \param severity The logger will only emit messages that have severity of this level or higher.
-        //!
+        /**
+         * @brief Update the maximum verbosity emitted by this logger.
+         * @param severity The logger emits messages with this severity or higher priority.
+         */
         void setReportableSeverity(Severity severity)
         {
             mReportableSeverity = severity;
         }
 
-        //!
-        //! \brief Opaque handle that holds logging information for a particular test
-        //!
-        //! This object is an opaque handle to information used by the Logger to print test results.
-        //! The sample must call Logger::defineTest() in order to obtain a TestAtom that can be used
-        //! with Logger::reportTest{Start,End}().
-        //!
+        /**
+         * @brief Opaque handle that stores legacy test-report metadata.
+         */
         class TestAtom
         {
         public:
+            /**
+             * @brief Move a test handle without copying stored strings.
+             */
             TestAtom(TestAtom&&) = default;
 
         private:
             friend class Logger;
 
+            /**
+             * @brief Construct a test atom with its initial state and reproduction command.
+             */
             TestAtom(bool started, const std::string& name, const std::string& cmdline)
                     : mStarted(started)
                     , mName(name)
@@ -298,96 +314,90 @@ namespace sample
             std::string mCmdline;
         };
 
-        //!
-        //! \brief Define a test for logging
-        //!
-        //! \param[in] name The name of the test.  This should be a string starting with
-        //!                  "TensorRT" and containing dot-separated strings containing
-        //!                  the characters [A-Za-z0-9_].
-        //!                  For example, "TensorRT.sample_googlenet"
-        //! \param[in] cmdline The command line used to reproduce the test
-        //
-        //! \return a TestAtom that can be used in Logger::reportTest{Start,End}().
-        //!
+        /**
+         * @brief Create a test-report handle from a name and command-line string.
+         * @param name Test name printed in the report line.
+         * @param cmdline Command line used to reproduce the test.
+         */
         static TestAtom defineTest(const std::string& name, const std::string& cmdline)
         {
             return TestAtom(false, name, cmdline);
         }
 
-        //!
-        //! \brief A convenience overloaded version of defineTest() that accepts an array of command-line arguments
-        //!        as input
-        //!
-        //! \param[in] name The name of the test
-        //! \param[in] argc The number of command-line arguments
-        //! \param[in] argv The array of command-line arguments (given as C strings)
-        //!
-        //! \return a TestAtom that can be used in Logger::reportTest{Start,End}().
+        /**
+         * @brief Create a test-report handle from an argv-style command line.
+         */
         static TestAtom defineTest(const std::string& name, int argc, char const* const* argv)
         {
+            // Reconstruct argv into a stable string before storing it in the handle.
             auto cmdline = genCmdlineString(argc, argv);
             return defineTest(name, cmdline);
         }
 
-        //!
-        //! \brief Report that a test has started.
-        //!
-        //! \pre reportTestStart() has not been called yet for the given testAtom
-        //!
-        //! \param[in] testAtom The handle to the test that has started
-        //!
+        /**
+         * @brief Print a legacy test-start report line and mark the handle as started.
+         */
         static void reportTestStart(TestAtom& testAtom)
         {
             reportTestResult(testAtom, TestResult::kRUNNING);
             testAtom.mStarted = true;
         }
 
-        //!
-        //! \brief Report that a test has ended.
-        //!
-        //! \pre reportTestStart() has been called for the given testAtom
-        //!
-        //! \param[in] testAtom The handle to the test that has ended
-        //! \param[in] result The result of the test. Should be one of TestResult::kPASSED,
-        //!                   TestResult::kFAILED, TestResult::kWAIVED
-        //!
+        /**
+         * @brief Print a legacy test-end report line.
+         */
         static void reportTestEnd(const TestAtom& testAtom, TestResult result)
         {
             reportTestResult(testAtom, result);
         }
 
+        /**
+         * @brief Report a passed test and return process success.
+         */
         static int reportPass(const TestAtom& testAtom)
         {
             reportTestEnd(testAtom, TestResult::kPASSED);
             return EXIT_SUCCESS;
         }
 
+        /**
+         * @brief Report a failed test and return process failure.
+         */
         static int reportFail(const TestAtom& testAtom)
         {
             reportTestEnd(testAtom, TestResult::kFAILED);
             return EXIT_FAILURE;
         }
 
+        /**
+         * @brief Report a waived test and return process success.
+         */
         static int reportWaive(const TestAtom& testAtom)
         {
             reportTestEnd(testAtom, TestResult::kWAIVED);
             return EXIT_SUCCESS;
         }
 
+        /**
+         * @brief Report pass/fail from a boolean result.
+         */
         static int reportTest(const TestAtom& testAtom, bool pass)
         {
             return pass ? reportPass(testAtom) : reportFail(testAtom);
         }
 
+        /**
+         * @brief Return the current maximum verbosity emitted by this logger.
+         */
         Severity getReportableSeverity() const
         {
             return mReportableSeverity;
         }
 
     private:
-        //!
-        //! \brief returns an appropriate string for prefixing a log message with the given severity
-        //!
+        /**
+         * @brief Return the prefix used for a severity in legacy formatting.
+         */
         static const char* severityPrefix(Severity severity)
         {
             switch (severity)
@@ -401,9 +411,9 @@ namespace sample
             }
         }
 
-        //!
-        //! \brief returns an appropriate string for prefixing a test result message with the given result
-        //!
+        /**
+         * @brief Return the printed text for a legacy test result.
+         */
         static const char* testResultString(TestResult result)
         {
             switch (result)
@@ -416,18 +426,19 @@ namespace sample
             }
         }
 
-        //!
-        //! \brief returns an appropriate output stream (cout or cerr) to use with the given severity
-        //!
+        /**
+         * @brief Return the stream used by legacy test-report helpers.
+         */
         static std::ostream& severityOstream(Severity severity)
         {
-            //return severity >= Severity::kINFO ? std::cout : std::cerr;
+            // Current demos send legacy test-report lines to stdout regardless of severity.
+            (void)severity;
             return std::cout;
         }
 
-        //!
-        //! \brief method that implements logging test results
-        //!
+        /**
+         * @brief Print one legacy test-report line.
+         */
         static void reportTestResult(const TestAtom& testAtom, TestResult result)
         {
             severityOstream(Severity::kINFO) << "&&&& " << testResultString(result)
@@ -435,9 +446,9 @@ namespace sample
                                              << std::endl;
         }
 
-        //!
-        //! \brief generate a command line string from the given (argc, argv) values
-        //!
+        /**
+         * @brief Generate a command-line string from argv values.
+         */
         static std::string genCmdlineString(int argc, char const* const* argv)
         {
             std::stringstream ss;
@@ -456,101 +467,80 @@ namespace sample
     namespace
     {
 
-        //!
-        //! \brief produces a LogStreamConsumer object that can be used to log messages of severity kVERBOSE
-        //!
-        //! Example usage:
-        //!
-        //!     LOG_VERBOSE(logger) << "hello world" << std::endl;
-        //!
+        /**
+         * @brief Create a verbose log stream using an explicit logger.
+         */
         inline LogStreamConsumer LOG_VERBOSE(const Logger& logger)
         {
             return LogStreamConsumer(logger.getReportableSeverity(), Severity::kVERBOSE);
         }
 
+        /**
+         * @brief Create a verbose log stream using the global demo logger.
+         */
         inline LogStreamConsumer LOG_VERBOSE() {
             return LOG_VERBOSE(gLogger);
         }
 
-        //!
-        //! \brief produces a LogStreamConsumer object that can be used to log messages of severity kINFO
-        //!
-        //! Example usage:
-        //!
-        //!     LOG_INFO(logger) << "hello world" << std::endl;
-        //!
+        /**
+         * @brief Create an info log stream using an explicit logger.
+         */
         inline LogStreamConsumer LOG_INFO(const Logger& logger)
         {
             return LogStreamConsumer(logger.getReportableSeverity(), Severity::kINFO);
         }
 
+        /**
+         * @brief Create an info log stream using the global demo logger.
+         */
         inline LogStreamConsumer LOG_INFO() {
             return LOG_INFO(gLogger);
         }
 
-        //!
-        //! \brief produces a LogStreamConsumer object that can be used to log messages of severity kWARNING
-        //!
-        //! Example usage:
-        //!
-        //!     LOG_WARN(logger) << "hello world" << std::endl;
-        //!
+        /**
+         * @brief Create a warning log stream using an explicit logger.
+         */
         inline LogStreamConsumer LOG_WARN(const Logger& logger)
         {
             return LogStreamConsumer(logger.getReportableSeverity(), Severity::kWARNING);
         }
 
+        /**
+         * @brief Create a warning log stream using the global demo logger.
+         */
         inline LogStreamConsumer LOG_WARN() {
             return LOG_WARN(gLogger);
         }
 
-        //!
-        //! \brief produces a LogStreamConsumer object that can be used to log messages of severity kERROR
-        //!
-        //! Example usage:
-        //!
-        //!     LOG_ERROR(logger) << "hello world" << std::endl;
-        //!
+        /**
+         * @brief Create an error log stream using an explicit logger.
+         */
         inline LogStreamConsumer LOG_ERROR(const Logger& logger)
         {
             return LogStreamConsumer(logger.getReportableSeverity(), Severity::kERROR);
         }
 
+        /**
+         * @brief Create an error log stream using the global demo logger.
+         */
         inline LogStreamConsumer LOG_ERROR() {
             return LOG_ERROR(gLogger);
         }
 
-        //!
-        //! \brief produces a LogStreamConsumer object that can be used to log messages of severity kINTERNAL_ERROR
-        //         ("fatal" severity)
-        //!
-        //! Example usage:
-        //!
-        //!     LOG_FATAL(logger) << "hello world" << std::endl;
-        //!
+        /**
+         * @brief Create a fatal log stream using an explicit logger.
+         */
         inline LogStreamConsumer LOG_FATAL(const Logger& logger)
         {
             return LogStreamConsumer(logger.getReportableSeverity(), Severity::kINTERNAL_ERROR);
         }
 
+        /**
+         * @brief Create a fatal log stream using the global demo logger.
+         */
         inline LogStreamConsumer LOG_FATAL() {
             return LOG_FATAL(gLogger);
         }
-
-
-/*        //!
-        //! \brief produces a LogStreamConsumer object that can be used to log messages of severity kINTERNAL_ERROR
-        //         ("fatal" severity)
-        //!
-        //! Example usage:
-        //!
-        //!     LOG_FATAL() << "hello world" << std::endl;
-        //!
-        inline LogStreamConsumer LOG_CONSOLE()
-        {
-            return LogStreamConsumer(gLogger.getReportableSeverity(), Severity::kINTERNAL_ERROR);
-        }*/
-
 
     } // anonymous namespace
 }
