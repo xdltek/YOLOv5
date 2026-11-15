@@ -94,8 +94,21 @@ bool loadCachedEngine(const std::filesystem::path& cache_path,
     if (!runtime) {
         return false;
     }
+
+    // Some SDK/runtime combinations can return a non-null engine while reporting
+    // missing serialized weights. Treat any deserialization error as a cache miss
+    // so inference never continues with a partially restored engine.
+    sample::gLogger.clearRuntimeErrorCount();
     engine.reset(runtime->deserializeCudaEngine(data.data(), data.size()));
-    return engine != nullptr;
+    if (!engine || sample::gLogger.getRuntimeErrorCount() != 0) {
+        engine.reset();
+        runtime.reset();
+        std::cout << "[ENGINE  ] Cached engine could not be restored safely; "
+                     "rebuilding from ONNX: "
+                  << cache_path << std::endl;
+        return false;
+    }
+    return true;
 }
 
 bool saveEngineCache(const std::filesystem::path& cache_path, const infer1::IEngine& engine)

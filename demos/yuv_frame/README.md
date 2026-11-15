@@ -8,7 +8,7 @@ This application runs one I420 YUV frame through the reusable YOLOv5 RPP pipelin
 
 ## Application Scope
 
-- Load a validated classic YOLOv5 P5 or P6 ONNX model.
+- Load a validated classic YOLOv5n/s/m/l/x ONNX model.
 - Read one I420 frame from a raw `.yuv` file.
 - Use RPP preprocessing to convert and letterbox the YUV input for YOLOv5.
 - Run one explicit warmup pass.
@@ -156,7 +156,7 @@ Use this workload when the integrating application receives raw I420 frames. The
 
 ## 应用范围
 
-- 加载本版本验证的经典 YOLOv5 P5 或 P6 ONNX 模型。
+- 加载本版本验证的经典 YOLOv5n/s/m/l/x ONNX 模型。
 - 从原始 `.yuv` 文件读取一帧 I420 数据。
 - 使用 RPP 前处理完成 YUV 输入转换和 YOLOv5 letterbox。
 - 显式执行一次完整 warmup。

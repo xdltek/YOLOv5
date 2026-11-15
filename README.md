@@ -182,7 +182,7 @@ scripts/benchmark.sh -m weights/yolov5s.onnx --demo yuv --loop 20
 
 Each script supports `-h` and `--help`.
 
-On the first run for a model, the runtime builds an engine and stores it under `<model-directory>/.engine_cache/`. Later runs with identical ONNX content, OpenRT version, and engine build settings reuse that engine. Runtime logs always state whether the engine was built or reused. Replacing the ONNX content produces a different cache key and triggers a new build.
+On the first run for a model, the runtime builds an engine and stores it under `<model-directory>/.engine_cache/`. Later runs with identical ONNX content, OpenRT version, and engine build settings attempt to reuse that engine. The cache is accepted only when OpenRT restores it without an error; otherwise the application prints the reason and safely rebuilds from ONNX. Runtime logs always state whether the engine was built, reused, or rejected. Replacing the ONNX content produces a different cache key and triggers a new build.
 
 ## Advanced: Direct Executable Usage
 
@@ -293,7 +293,7 @@ The following components provide the primary C++ integration interfaces:
 
 ## Known Limitations
 
-- This release supports the static, simplified, COCO80 P5/P6 contracts listed in the appendix. Dynamic shapes, `u` variants, custom-class outputs, and nonstandard coordinate layouts require separate adaptation and validation.
+- This release supports the static, simplified COCO80 YOLOv5n/s/m/l/x contracts listed in the appendix. Dynamic shapes, other model families, custom-class outputs, and nonstandard coordinate layouts require separate adaptation and validation.
 - INT8 model parsing and engine execution remain experimental; INT8 accuracy is not a V2.0 release criterion.
 - The application uses independent preprocessing, OpenRT inference, and postprocessing stages. Graph mode is not used.
 
@@ -301,14 +301,14 @@ The following components provide the primary C++ integration interfaces:
 
 - If `-m/--model` is omitted and the optional fallback model is not present, rerun with an explicit supported ONNX path.
 - If an executable is missing, rebuild with `scripts/build.sh`.
-- Some larger models can emit OpenRT SDK `KernelWeights` or `BiasWeights` messages while a cached engine is being deserialized. If the log then reports `Reusing cached OpenRT engine` and ends with `[SUCCESS]`, the engine was loaded and inference completed correctly. A first-time ONNX build was separately verified without these messages.
-- If engine loading or inference does not reach `[SUCCESS]`, remove only that model's matching file under `<model-directory>/.engine_cache/` and rerun to rebuild it. Do not remove the ONNX model.
+- If OpenRT reports an error while restoring an engine cache, the application rejects that cache and prints `Cached engine could not be restored safely; rebuilding from ONNX`. No manual action is required. Depending on the installed SDK and model, this safe fallback can add engine-build time at startup but does not affect measured frame performance.
+- If engine construction or inference does not reach `[SUCCESS]`, remove only that model's matching file under `<model-directory>/.engine_cache/` and rerun. Do not remove the ONNX model.
 
 ## Appendix: Supported Models And ONNX Export
 
 ### Validated model family
 
-This release supports the classic COCO80 YOLOv5 P5 and P6 detection families listed below at two static input shapes. All 20 detection artifacts were validated end to end with FP32 input/output bindings, one warmup pass, one measured RGB inference pass, a non-empty detection result, and a rendered output image. The 1280×1024 set was additionally verified through first-run OpenRT engine construction.
+This release supports the classic COCO80 YOLOv5n/s/m/l/x detection family at two static input shapes. All 10 listed artifacts were validated end to end with FP32 input/output bindings in both retained applications. Each model completed one warmup frame and 50 measured RGB-image frames, followed by one warmup frame and 50 measured I420-YUV frames, with non-empty detection results and rendered output images.
 
 | Model family | 640×640 artifact | 1280×1024 artifact | Status |
 | :--- | :--- | :--- | :--- |
@@ -317,20 +317,14 @@ This release supports the classic COCO80 YOLOv5 P5 and P6 detection families lis
 | YOLOv5m | `yolov5m_640x640_sim.onnx` | `yolov5m_1280x1024_sim.onnx` | Verified |
 | YOLOv5l | `yolov5l_640x640_sim.onnx` | `yolov5l_1280x1024_sim.onnx` | Verified |
 | YOLOv5x | `yolov5x_640x640_sim.onnx` | `yolov5x_1280x1024_sim.onnx` | Verified |
-| YOLOv5n6 | `yolov5n6_640x640_sim.onnx` | `yolov5n6_1280x1024_sim.onnx` | Verified |
-| YOLOv5s6 | `yolov5s6_640x640_sim.onnx` | `yolov5s6_1280x1024_sim.onnx` | Verified |
-| YOLOv5m6 | `yolov5m6_640x640_sim.onnx` | `yolov5m6_1280x1024_sim.onnx` | Verified |
-| YOLOv5l6 | `yolov5l6_640x640_sim.onnx` | `yolov5l6_1280x1024_sim.onnx` | Verified |
-| YOLOv5x6 | `yolov5x6_640x640_sim.onnx` | `yolov5x6_1280x1024_sim.onnx` | Verified |
+| Input contract | Decoded output | Validated opset |
+| :--- | :--- | :--- |
+| FP32 NCHW `[1,3,640,640]` | FP32 `[1,25200,85]` | 12 |
+| FP32 NCHW `[1,3,1280,1024]` | FP32 `[1,80640,85]` | 19 |
 
-| Input contract | P5 decoded output | P6 decoded output | Validated opset |
-| :--- | :--- | :--- | :--- |
-| FP32 NCHW `[1,3,640,640]` | FP32 `[1,25200,85]` | FP32 `[1,25500,85]` | 12 |
-| FP32 NCHW `[1,3,1280,1024]` | FP32 `[1,80640,85]` | FP32 `[1,81600,85]` | 19 |
+The validated files are stored locally under `weights/yolov5/onnx_sim/`. They use pixel-space `xywh` and the standard COCO 80-class ordering. In the 1280×1024 filenames and export command, the dimensions follow the model tensor's height×width order. The release notes report 50-frame measurements for all 10 listed artifacts in both retained applications; the results describe this local release run and are not cross-platform performance guarantees.
 
-The validated files are stored locally under `weights/yolov5/onnx_sim/`. They use pixel-space `xywh` and the standard COCO 80-class ordering. In the 1280×1024 filenames and export command, the dimensions follow the model tensor's height×width order. The 50-frame performance figures in the release notes were measured with YOLOv5s at 640×640 only and are not performance guarantees for other models or input shapes.
-
-YOLOv5u variants (`yolov5nu` through `yolov5xu`), YOLOv5 P6-u variants (`yolov5n6u` through `yolov5x6u`), YOLOv8, custom-class outputs, normalized-coordinate outputs, and other model families are not supported by this release.
+YOLOv5u, YOLOv8, custom-class outputs, normalized-coordinate outputs, and model families not listed above are outside this release scope.
 
 Q/DQ INT8 ONNX parsing and engine execution are retained as an experimental capability when OpenRT accepts the graph and its external bindings remain FP32. INT8 numerical accuracy and end-to-end detection results are not release acceptance criteria for this version.
 
@@ -354,7 +348,7 @@ python export.py \
 python -m onnxsim yolov5s.onnx yolov5s_sim.onnx
 ```
 
-For the validated high-resolution contract, use `--imgsz 1280 1024 --opset 19`; the dimensions are height followed by width. Replace `yolov5s.pt` with `yolov5n.pt`, `yolov5m.pt`, `yolov5l.pt`, `yolov5x.pt`, or the corresponding P6 weight (`yolov5n6.pt` through `yolov5x6.pt`) as required. Update both filenames in the `onnxsim` command, then pass the generated `*_sim.onnx` file with `-m/--model`. As an optional convenience, a YOLOv5s artifact placed at `weights/yolov5s.onnx` is used when the model option is omitted.
+For the validated high-resolution contract, use `--imgsz 1280 1024 --opset 19`; the dimensions are height followed by width. Replace `yolov5s.pt` with `yolov5n.pt`, `yolov5m.pt`, `yolov5l.pt`, or `yolov5x.pt` as required. Update both filenames in the `onnxsim` command, then pass the generated `*_sim.onnx` file with `-m/--model`. As an optional convenience, a YOLOv5s artifact placed at `weights/yolov5s.onnx` is used when the model option is omitted.
 
 ---
 
@@ -542,6 +536,8 @@ scripts/benchmark.sh -m weights/yolov5s.onnx --demo yuv --loop 20
 
 每个脚本都支持 `-h` 和 `--help`。
 
+首次运行某个模型时，runtime 会构建 engine 并保存到 `<模型目录>/.engine_cache/`。后续运行在 ONNX 内容、OpenRT 版本和 engine 构建配置相同时会尝试复用该 engine。只有 OpenRT 无错误恢复时才会接受缓存；否则应用会打印原因并安全地从 ONNX 重建。运行日志会始终明确打印本次是新建、复用还是拒绝缓存。替换 ONNX 内容后会得到不同缓存键，并自动触发重新构建。
+
 ## 高级用法：直接运行可执行程序
 
 脚本是推荐的客户使用方式，可统一解析路径并管理 `rpp_server` 启动。系统集成场景也可以直接运行应用可执行程序，并显式传入路径：
@@ -648,7 +644,7 @@ build/bin/yolov5_yuv_frame_demo \
 
 ## 已知限制
 
-- 本版本支持附录中列出的静态维度、已简化 COCO80 P5/P6 模型契约。动态维度、`u` 系列、自定义类别输出和非标准坐标布局需要单独适配并重新验证。
+- 本版本支持附录中列出的静态维度、已简化 COCO80 YOLOv5n/s/m/l/x 模型契约。动态维度、其他模型系列、自定义类别输出和非标准坐标布局需要单独适配并重新验证。
 - INT8 模型解析和 engine 执行仍为实验性能力；INT8 精度不属于 V2.0 发布验收项。
 - 应用采用独立的前处理、OpenRT 推理和后处理阶段，不使用 Graph 模式。
 
@@ -656,14 +652,14 @@ build/bin/yolov5_yuv_frame_demo \
 
 - 如果未传入 `-m/--model` 且可选回退模型不存在，请使用明确的 ONNX 模型路径重新运行。
 - 可执行程序不存在时，请使用 `scripts/build.sh` 重新构建。
-- 部分较大模型在反序列化缓存 engine 时，可能打印 OpenRT SDK 的 `KernelWeights` 或 `BiasWeights` 信息。如果后续日志显示 `Reusing cached OpenRT engine` 并最终输出 `[SUCCESS]`，则 engine 已成功加载且推理正常完成。无缓存的首次 ONNX 构建已单独验证，不会出现这些信息。
-- 如果 engine 加载或推理未到达 `[SUCCESS]`，仅删除 `<模型目录>/.engine_cache/` 下与该模型对应的缓存文件后重新运行，以触发重建；请勿删除 ONNX 模型。
+- 如果 OpenRT 在恢复 engine 缓存时报告错误，应用会拒绝该缓存，并打印 `Cached engine could not be restored safely; rebuilding from ONNX`。用户无需手动处理。根据本机 SDK 和模型情况，这一安全回退可能增加启动时的 engine 构建时间，但不影响正式测量帧的性能。
+- 如果 engine 构建或推理未到达 `[SUCCESS]`，仅删除 `<模型目录>/.engine_cache/` 下与该模型对应的缓存文件后重新运行；请勿删除 ONNX 模型。
 
 ## 附录：支持的模型与 ONNX 导出
 
 ### 已验证模型系列
 
-本版本支持下表所列的经典 COCO80 YOLOv5 P5 和 P6 检测模型，并覆盖两种静态输入 shape。全部 20 个检测模型均使用 FP32 输入/输出 binding 完成端到端验证，包括 1 次 warmup、1 次 RGB 正式推理、非空检测结果和检测图输出；1280×1024 模型还完成了首次 OpenRT engine 构建验证。
+本版本支持经典 COCO80 YOLOv5n/s/m/l/x 检测模型，并覆盖两种静态输入 shape。下表所列的 10 个模型文件均使用 FP32 输入/输出 binding，在两个保留应用中完成端到端验证。每个模型分别完成 1 帧 warmup 和 50 帧 RGB 图片正式测量，以及 1 帧 warmup 和 50 帧 I420 YUV 正式测量，均获得非空检测结果并成功输出检测图。
 
 | 模型系列 | 640×640 文件 | 1280×1024 文件 | 状态 |
 | :--- | :--- | :--- | :--- |
@@ -672,20 +668,14 @@ build/bin/yolov5_yuv_frame_demo \
 | YOLOv5m | `yolov5m_640x640_sim.onnx` | `yolov5m_1280x1024_sim.onnx` | 已验证 |
 | YOLOv5l | `yolov5l_640x640_sim.onnx` | `yolov5l_1280x1024_sim.onnx` | 已验证 |
 | YOLOv5x | `yolov5x_640x640_sim.onnx` | `yolov5x_1280x1024_sim.onnx` | 已验证 |
-| YOLOv5n6 | `yolov5n6_640x640_sim.onnx` | `yolov5n6_1280x1024_sim.onnx` | 已验证 |
-| YOLOv5s6 | `yolov5s6_640x640_sim.onnx` | `yolov5s6_1280x1024_sim.onnx` | 已验证 |
-| YOLOv5m6 | `yolov5m6_640x640_sim.onnx` | `yolov5m6_1280x1024_sim.onnx` | 已验证 |
-| YOLOv5l6 | `yolov5l6_640x640_sim.onnx` | `yolov5l6_1280x1024_sim.onnx` | 已验证 |
-| YOLOv5x6 | `yolov5x6_640x640_sim.onnx` | `yolov5x6_1280x1024_sim.onnx` | 已验证 |
+| 输入契约 | 解码输出 | 已验证 opset |
+| :--- | :--- | :--- |
+| FP32 NCHW `[1,3,640,640]` | FP32 `[1,25200,85]` | 12 |
+| FP32 NCHW `[1,3,1280,1024]` | FP32 `[1,80640,85]` | 19 |
 
-| 输入契约 | P5 解码输出 | P6 解码输出 | 已验证 opset |
-| :--- | :--- | :--- | :--- |
-| FP32 NCHW `[1,3,640,640]` | FP32 `[1,25200,85]` | FP32 `[1,25500,85]` | 12 |
-| FP32 NCHW `[1,3,1280,1024]` | FP32 `[1,80640,85]` | FP32 `[1,81600,85]` | 19 |
+已验证文件位于本地 `weights/yolov5/onnx_sim/`，均使用像素坐标 `xywh` 和标准 COCO 80 类顺序。1280×1024 文件名和导出命令中的尺寸顺序与模型 tensor 的高×宽一致。ReleaseNote 报告了全部 10 个模型文件在两个保留应用中的 50 帧测量结果；这些数据仅代表本地本次发布测量，不构成跨平台性能保证。
 
-已验证文件位于本地 `weights/yolov5/onnx_sim/`，均使用像素坐标 `xywh` 和标准 COCO 80 类顺序。1280×1024 文件名和导出命令中的尺寸顺序与模型 tensor 的高×宽一致。ReleaseNote 中的 50 帧性能数据仅使用 640×640 YOLOv5s 测得，不代表其他型号或输入 shape 的性能保证。
-
-本版本不支持 YOLOv5u（`yolov5nu` 至 `yolov5xu`）、YOLOv5 P6-u（`yolov5n6u` 至 `yolov5x6u`）、YOLOv8、自定义类别输出、归一化坐标输出及其他模型系列。
+YOLOv5u、YOLOv8、自定义类别输出、归一化坐标输出及上表未列出的其他模型系列不在本版本发布范围内。
 
 对于外部 binding 仍为 FP32、且能够被 OpenRT 接受的 Q/DQ INT8 ONNX，本版本保留模型解析和 engine 执行能力，作为实验性功能。INT8 数值精度和端到端检测结果不作为本版本发布验收项。
 
@@ -709,4 +699,4 @@ python export.py \
 python -m onnxsim yolov5s.onnx yolov5s_sim.onnx
 ```
 
-如需使用已验证的高分辨率契约，请设置 `--imgsz 1280 1024 --opset 19`；尺寸顺序为高、宽。可按需将 `yolov5s.pt` 替换为 `yolov5n.pt`、`yolov5m.pt`、`yolov5l.pt`、`yolov5x.pt`，或对应的 P6 权重（`yolov5n6.pt` 至 `yolov5x6.pt`）。同时更新 `onnxsim` 命令中的输入和输出文件名，并通过 `-m/--model` 传入生成的 `*_sim.onnx`。为便于本地使用，也可将 YOLOv5s 模型放置为 `weights/yolov5s.onnx`，作为未传入模型参数时的可选回退文件。
+如需使用已验证的高分辨率契约，请设置 `--imgsz 1280 1024 --opset 19`；尺寸顺序为高、宽。可按需将 `yolov5s.pt` 替换为 `yolov5n.pt`、`yolov5m.pt`、`yolov5l.pt` 或 `yolov5x.pt`。同时更新 `onnxsim` 命令中的输入和输出文件名，并通过 `-m/--model` 传入生成的 `*_sim.onnx`。为便于本地使用，也可将 YOLOv5s 模型放置为 `weights/yolov5s.onnx`，作为未传入模型参数时的可选回退文件。
