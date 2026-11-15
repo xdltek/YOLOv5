@@ -1,112 +1,120 @@
 <a id="english"></a>
 
-# YOLOv5 Inference Demo on RPP
+# RPP-Accelerated YOLOv5 Application
 
-Language switch: click [English](#english) or [中文](#chinese) to jump to the corresponding section.
+**Language: English (default) | [切换到中文](#chinese)**
 
 ![XDL Logo](docs/logo/logo_color_horizontal.png)
 
-This repository is a C++ demo for running a YOLOv5 object detection model on RPP accelerator hardware.
-It is intended to help users quickly build the project, run inference, and use the source code as a reference for edge inference applications.
+This application brings supported YOLOv5 object detection to RPP accelerator hardware. It provides streamlined build, inference, and performance measurement workflows for RGB images and I420 YUV frames, together with C++ interfaces for solution integration.
+
+Application highlights:
+
+- RPP-accelerated preprocessing, OpenRT inference, and postprocessing in one integrated pipeline.
+- RGB/BGR image and I420 YUV frame input workflows.
+- Automatic engine caching for faster startup on subsequent runs with the same model.
+- Annotated image output plus latency, FPS, and stage-level performance reporting.
+- Script-based operation and C++ interfaces for system integration.
 
 **Table Of Contents**
 
 Click a section link below to jump within this README:
 
 - [Quick Start](#quick-start)
-- [Repository Layout](#repository-layout)
-- [Demo Guides](#demo-guides)
-- [Documentation](#documentation)
 - [Prerequisites](#prerequisites)
 - [How to Build](#how-to-build)
 - [How to Run](#how-to-run)
-- [Direct Binary Usage](#direct-binary-usage)
-- [Code Execution Workflow](#code-execution-workflow)
-- [Key Source Files](#key-source-files)
-- [Reusable Components](#reusable-components)
-- [How to Adapt This Demo](#how-to-adapt-this-demo)
+- [Package Contents](#package-contents)
+- [Workload Guides](#workload-guides)
+- [Documentation](#documentation)
+- [Advanced: Direct Executable Usage](#advanced-direct-executable-usage)
+- [Processing Workflow](#processing-workflow)
+- [Integration Reference](#integration-reference)
+- [Integration Capabilities](#integration-capabilities)
+- [Application Integration](#application-integration)
+- [Appendix: Supported Models And ONNX Export](#appendix-supported-models-and-onnx-export)
 
 ## Quick Start
 
-Run from the repository root. `scripts/build.sh` downloads and verifies the default YOLOv5s ONNX model under `weights/` when it is missing.
+Run the following commands from the application root. Replace the model path if your ONNX file has a different name.
 
 ```shell
 scripts/build.sh
-scripts/run.sh
+scripts/run.sh -o weights/yolov5s_sim.onnx
 ```
 
-Successful execution should print warmup-stable stage timing and FPS for the RGB and YUV demos, and generate rendered images under `build/output`.
+Successful execution reports measured latency and FPS after warmup, then saves annotated result images under `build/output`.
 
 The standard scripts are:
 
 | Script | Purpose |
 |---|---|
-| `scripts/build.sh` | Downloads the default model when needed, cleans previous build outputs, configures CMake, and builds the project. |
-| `scripts/run.sh` | Runs all demos by default, or one selected demo with configurable model, input, output, and loop count. |
-| `scripts/benchmark.sh` | Runs all demos by default with repeated measured loops and saves a full log automatically. |
+| `scripts/build.sh` | Cleans previous build outputs, configures CMake, and builds the project; it does not inspect or prepare a model. |
+| `scripts/run.sh` | Runs both supported workloads or one selected workload with configurable model, input, output, and measurement count. |
+| `scripts/benchmark.sh` | Measures one or both workloads over repeated runs and saves the complete performance log. |
 
-Common first checks:
+Run a single input format or start a benchmark as follows:
 
 ```shell
-scripts/run.sh --demo rgb
-scripts/run.sh --demo yuv
-scripts/benchmark.sh
+scripts/run.sh -o weights/yolov5s_sim.onnx --demo rgb
+scripts/run.sh -o weights/yolov5s_sim.onnx --demo yuv
+scripts/benchmark.sh -o weights/yolov5s_sim.onnx --demo rgb --loop 20
 ```
 
-`scripts/run.sh` resolves paths from the repository root. By default it runs `rgb` and `yuv` serially, uses `weights/yolov5s.onnx`, reads inputs from `build/assets`, and writes rendered images to `build/output`. If `/usr/local/rpp/bin/rpp_server` exists, the script ensures it is running before launching the demo and writes the server log to `build/logs/rpp_server.log`.
+`scripts/run.sh` resolves paths from the package root. By default it runs the `rgb` and `yuv` workloads serially, uses `weights/yolov5s.onnx`, reads inputs from `build/assets`, and writes annotated images to `build/output`. If `/usr/local/rpp/bin/rpp_server` is installed, the script ensures that the service is available before inference and writes its log to `build/logs/rpp_server.log`.
 
 `scripts/benchmark.sh` saves the full console log to `build/logs/benchmark_<demo>_<timestamp>.log`.
 
-## Repository Layout
+## Package Contents
 
 Linked paths in this section can be clicked to jump to their detailed README.
 
 - `CMakeLists.txt`
-  Root build entry. Configures shared dependencies and builds the reusable libraries and demo targets.
+  Main build configuration for application executables and shared runtime libraries.
 - `src/perf/`
-  Optional `rpp_perf` trace session wrapper. It is active only when CMake is configured with `-DYOLO_ENABLE_RPP_PERF=ON`; perf-enabled demo builds automatically save trace files under `build/trace`.
+  Optional `rpp_perf` tracing support. It is active only when CMake is configured with `-DYOLO_ENABLE_RPP_PERF=ON`; enabled builds save trace files under `build/trace`.
 - `src/utils/`
-  Logging, ONNX parse helper, buffer helpers, and CLI/path utilities.
+  Shared logging, ONNX parsing, buffer management, and command-line utilities.
 - `src/yolov5/`
   YOLOv5-specific labels, detection types, visualization, and pipeline composition.
 - [`rpp/`](rpp/README.md)
-  RPP hardware-facing modules, including OpenRT inference, preprocessing kernels/modules, and postprocessing.
+  RPP-accelerated inference, preprocessing, and postprocessing components.
 - `demos/`
-  Executable demo entries, including RGB image and I420 YUV frame demos.
+  Application executable sources for RGB image and I420 YUV frame workloads.
 - [`docs/`](docs/README.md)
   Public project documentation, logo assets, and API documentation links.
 - `scripts/`
-  Standard build, run, and benchmark command entry points.
+  Customer-facing build, inference, and performance measurement commands.
 - `assets/`
-  Source sample image and I420 frame copied into `build/assets/` for quick verification.
+  Reference RGB image and I420 frame copied into `build/assets/` during configuration.
 - `weights/`
   Local model drop-in directory. The directory is kept in Git, but model files are ignored.
 - `3rd_party/`
-  `argparse` header-only library used by demo main files for CLI parsing.
+  `argparse` header-only dependency used by the application executables.
 
-This repository does not track ONNX model files in Git. `scripts/build.sh` keeps `weights/yolov5s.onnx` available by downloading it from `xdltek/onnx_model_tool` and checking its MD5 when needed. Class names for overlays are the embedded MS COCO 80-class list in `src/yolov5/labels.cpp` (`coco80_class_labels()`), matching standard YOLOv5 COCO pretrained ordering.
+ONNX model files are supplied separately and are not included in Git. Building is independent of model availability and never downloads or verifies an ONNX file. At runtime, pass a model with `-o/--onnx`; when that option is omitted, the scripts use `weights/yolov5s.onnx` if it exists. Detection overlays use the embedded MS COCO 80-class list in `src/yolov5/labels.cpp`, following the standard YOLOv5 COCO class order.
 
-## Demo Guides
+## Workload Guides
 
-The root README explains the shared build and architecture. Each executable has its own guide with its input format, command-line options, workflow, and expected output:
+Each supported workload provides a dedicated guide covering its input format, command-line options, processing flow, and expected output:
 
-Click the guide path to jump to the corresponding demo document:
+Select the guide for the required input format:
 
-- [RGB image demo](demos/rgb_image/README.md): RGB/BGR image demo guide.
-- [I420 YUV frame demo](demos/yuv_frame/README.md): I420 YUV frame demo guide.
+- [RGB image workload](demos/rgb_image/README.md): RGB/BGR image inference.
+- [I420 YUV frame workload](demos/yuv_frame/README.md): I420 YUV frame inference.
 
 ## Documentation
 
 Click the document path to jump to the corresponding documentation:
 
 - [Project documentation](docs/README.md): public documentation entry.
-- [API documentation](docs/api/README.md): reusable API index.
-- [RPP acceleration modules](rpp/README.md): RPP module guide.
-- [Performance trace helper](src/perf/README.md): perf trace guide.
+- [API documentation](docs/api/README.md): integration API index.
+- [RPP acceleration components](rpp/README.md): accelerated processing reference.
+- [Performance tracing](src/perf/README.md): optional trace configuration and output.
 
 ## Prerequisites
 
-Before building this demo, make sure the following dependencies are available:
+Before building the application, make sure the following dependencies are available:
 
 - Linux development environment
 - CMake `>= 3.16.3`
@@ -114,23 +122,18 @@ Before building this demo, make sure the following dependencies are available:
 - OpenCV with the components required by this project
 - openRT installed under `/usr/local/rpp`
 - Runtime libraries required by the target RPP accelerator card environment
-- `wget` and `md5sum` when the default model must be downloaded by `scripts/build.sh`
 
 If your openRT installation path is different, update the corresponding path settings in `CMakeLists.txt`.
 
 ## How to Build
 
-Run the following commands from the repository root:
+Run the following command from the application root:
 
 ```shell
 scripts/build.sh
 ```
 
-If `weights/yolov5s.onnx` is missing, the build script downloads the default model and verifies:
-
-```shell
-12f4516124a90056f01692bae254ec6a  weights/yolov5s.onnx
-```
+The build does not require an ONNX model. A supported model is required only for inference or performance measurement.
 
 After the build completes successfully, the executable should be available at:
 
@@ -142,36 +145,50 @@ build/bin/yolov5_yuv_frame_demo
 Build outputs are grouped as:
 
 ```text
-build/bin/      demo executables
-build/lib/      libyolov5_core.so, librpp_inference.so, librpp_yolo_preprocess.so, librpp_yolo_postprocess.so, and helper libraries
-build/assets/   copied sample inputs
+build/bin/      application executables
+build/lib/      application runtime and RPP acceleration libraries
+build/assets/   reference input files
 build/output/   rendered detection images
 build/trace/    optional rpp_perf traces
 ```
 
 ## How to Run
 
-Run demos from the repository root after building the project. The default model path is `weights/yolov5s.onnx`; pass `--model` only when using a different model.
+Run the application from the package root after building. Specifying the ONNX path explicitly is recommended. If `-o/--onnx` is omitted, the script uses `weights/yolov5s.onnx` only when that file exists.
+
+| Option | Description | Default |
+|---|---|---|
+| `-o, --onnx PATH` | Static, simplified YOLOv5 ONNX model | `weights/yolov5s.onnx` when present |
+| `-d, --demo NAME` | Workload: `all`, `rgb`, or `yuv` | `all` |
+| `-i, --input PATH` | Input image or I420 YUV file | Reference input for the selected workload |
+| `--output PATH` | Rendered result image | `build/output/output_<demo>.jpg` |
+| `-l, --loop COUNT` | Number of measured frames after warmup | `1` |
 
 ```shell
-scripts/run.sh
+scripts/run.sh -o weights/yolov5s_sim.onnx
+scripts/run.sh -o weights/yolov5s_sim.onnx --demo rgb \
+  -i /path/to/input.jpg \
+  --output build/output/result.jpg
 ```
 
-By default, `scripts/run.sh` runs the RGB and YUV demos serially. Use `--demo rgb` or `--demo yuv` when running a single demo or passing a custom input/output path.
+By default, `scripts/run.sh` runs the RGB and YUV workloads serially. Use `--demo rgb` or `--demo yuv` to select one workload or provide a custom input/output path. The option name `--demo` is retained for command-line compatibility.
 
 Benchmark runs use the same default model and inputs:
 
 ```shell
-scripts/benchmark.sh
-scripts/benchmark.sh --demo rgb --loop 20
-scripts/benchmark.sh --demo yuv --loop 20
+scripts/benchmark.sh -o weights/yolov5s_sim.onnx --demo rgb --loop 20
+scripts/benchmark.sh -o weights/yolov5s_sim.onnx --demo yuv --loop 20
 ```
 
 Each script supports `-h` and `--help`.
 
-## Direct Binary Usage
+On the first run for a model, the runtime builds an engine and stores it under `<model-directory>/.engine_cache/`. Later runs with identical ONNX content, OpenRT version, and engine build settings reuse that engine. Runtime logs always state whether the engine was built or reused. Replacing the ONNX content produces a different cache key and triggers a new build.
 
-The scripts are the recommended first-use entry point because they resolve paths and protect the `rpp_server` startup flow. After building, users can also run the demo binaries directly from the repository root by passing explicit paths:
+## Advanced: Direct Executable Usage
+
+The scripts provide the recommended customer workflow because they resolve paths and manage `rpp_server` startup. For system integration, the application executables can also be launched directly with explicit paths:
+
+The scripts and C++ executables use the same model option: `-o/--onnx`. Use `--output` for the annotated result image. For input data, the application script uses `-i/--input`; the RGB executable uses `-i/--image`, and the YUV executable uses `--yuv`.
 
 ```shell
 build/bin/yolov5_rgb_image_demo \
@@ -191,14 +208,14 @@ build/bin/yolov5_yuv_frame_demo \
 
 When running binaries directly, make sure `rpp_server` is already running if the installed RPP environment requires it.
 
-For full command-line options and expected output, see the per-demo guides:
+For complete command-line options and expected output, see the workload guides:
 
-Click the guide path to jump to the corresponding demo document:
+Select the applicable workload guide:
 
-- [RGB image demo](demos/rgb_image/README.md): RGB/BGR image demo guide.
-- [I420 YUV frame demo](demos/yuv_frame/README.md): I420 YUV frame demo guide.
+- [RGB image workload](demos/rgb_image/README.md): RGB/BGR image inference.
+- [I420 YUV frame workload](demos/yuv_frame/README.md): I420 YUV frame inference.
 
-## Code Execution Workflow
+## Processing Workflow
 
 ```text
 +------------------------+
@@ -239,151 +256,200 @@ Click the guide path to jump to the corresponding demo document:
 +------------------------+
 ```
 
-## Key Source Files
+## Integration Reference
 
-Linked source paths in this section can be clicked to jump to their module README.
+The following components provide the primary C++ integration interfaces:
 
 - [`rpp/inference/rpp_infer_engine.*`](rpp/inference/README.md)
-  Generic OpenRT on RPP inference wrapper. Parses the ONNX model, builds the execution engine, allocates buffers, and runs inference.
+  OpenRT on RPP inference component for model loading, engine initialization, buffer allocation, and execution.
 - [`rpp/preprocess/rpp_yolo_preprocessor.*`](rpp/preprocess/README.md)
-  RPP preprocessing module and kernels for RGB/BGR/I420 inputs.
+  RPP preprocessing for RGB, BGR, and I420 inputs.
 - [`rpp/postprocess/rpp_yolo_postprocessor.*`](rpp/postprocess/README.md)
-  RPP postprocessing module for YOLO output slicing and NMS.
+  RPP postprocessing for YOLO output decoding and NMS.
 - [`src/yolov5/yolo_pipeline.*`](src/yolov5/README.md)
   YOLOv5 pipeline composition. Runs RPP preprocessing, inference, and RPP postprocessing once per call without hidden warmup.
 - `src/perf/perf_trace_session.*`
-  Optional rpp_perf trace wrapper used automatically when the project is built with `-DYOLO_ENABLE_RPP_PERF=ON`.
+  Optional `rpp_perf` tracing support enabled with `-DYOLO_ENABLE_RPP_PERF=ON`.
 - `demos/rgb_image/main.cpp`
-  RGB/BGR image demo entry point.
+  RGB/BGR application executable.
 - `demos/yuv_frame/main.cpp`
-  I420 YUV frame demo entry point.
+  I420 YUV application executable.
 
-## Reusable Components
+## Integration Capabilities
 
 - Command-line argument flow for model and image selection
 - Input preprocessing logic for YOLOv5-style models
 - Inference engine initialization and creation flow
-- Host/device buffer usage through shared helpers in the RPP execution path
+- Host/device buffer management across the RPP execution path
 - Detection decoding, NMS, and image rendering logic
 
-## How to Adapt This Demo
+## Application Integration
 
-- Point -o to any YOLOv5-compatible ONNX model produced by your pipeline.
+- Use `scripts/run.sh -o/--onnx` to select a supported YOLOv5 ONNX model. Use `--output` for the rendered result image.
 - If your model uses a different class ordering or dataset than COCO 80, edit `coco80_class_labels()` in `src/yolov5/labels.cpp` (or replace it with your own table).
-- Replace the sample image path with your own image source.
-- Reuse `rpp/inference/RppInferEngine`, `src/yolov5/YoloV5Pipeline`, and the demo argument/timing pattern as the starting point for your own RPP-based inference application.
+- Replace the reference input path with the target image or frame source.
+- Integrate `rpp/inference/RppInferEngine` and `src/yolov5/YoloV5Pipeline` into the target RPP-based inference workflow.
+
+## Appendix: Supported Models And ONNX Export
+
+### Supported model family
+
+Models exported from the official [Ultralytics YOLOv5 repository](https://github.com/ultralytics/yolov5) are supported for the classic YOLOv5 variants below:
+
+| Variant | Typical weight name | Status |
+| :--- | :--- | :--- |
+| YOLOv5n | `yolov5n.pt` | Supported |
+| YOLOv5s | `yolov5s.pt` | Supported |
+| YOLOv5m | `yolov5m.pt` | Supported |
+| YOLOv5l | `yolov5l.pt` | Supported |
+| YOLOv5x | `yolov5x.pt` | Supported |
+
+The current release does not support the following Ultralytics variants:
+
+- YOLOv5u models: `yolov5nu`, `yolov5su`, `yolov5mu`, `yolov5lu`, and `yolov5xu`.
+- YOLOv5 P6-u models: `yolov5n6u`, `yolov5s6u`, `yolov5m6u`, `yolov5l6u`, and `yolov5x6u`.
+
+### ONNX export requirements
+
+This product supports ONNX models with static input dimensions only. Simplify the exported model with `onnxsim`, and do not use the YOLOv5 `--dynamic` export option.
+
+```shell
+git clone https://github.com/ultralytics/yolov5.git
+cd yolov5
+pip install -r requirements.txt
+pip install onnx onnxruntime onnxsim
+
+python export.py \
+  --weights yolov5s.pt \
+  --include onnx \
+  --imgsz 640 640 \
+  --batch-size 1 \
+  --opset 12
+
+python -m onnxsim yolov5s.onnx yolov5s_sim.onnx
+```
+
+Replace `yolov5s.pt` with `yolov5n.pt`, `yolov5m.pt`, `yolov5l.pt`, or `yolov5x.pt` as required, and update both filenames in the `onnxsim` command. Use the generated `*_sim.onnx` file when running this product.
 
 ---
 
 <a id="chinese"></a>
 
-# YOLOv5 RPP 推理 Demo
+# RPP 加速 YOLOv5 应用
 
-语言切换：点击 [English](#english) 或 [中文](#chinese) 跳转到对应语言章节。
+**语言：[English](#english) | 中文**
 
 ![XDL Logo](docs/logo/logo_color_horizontal.png)
 
-本仓库是一个 C++ 示例工程，用于在 RPP 加速硬件上运行 YOLOv5 目标检测模型。
-它的目标是帮助用户快速完成编译、运行推理，并理解如何复用项目中的 RPP 推理、前处理、后处理和 demo 组织方式。
+本应用面向 RPP 加速硬件提供 YOLOv5 目标检测能力，支持 RGB 图片和 I420 YUV 帧的标准化编译、推理与性能测量流程，并提供用于方案集成的 C++ 接口。
+
+应用亮点：
+
+- 在统一 pipeline 中完成 RPP 加速前处理、OpenRT 推理和后处理。
+- 支持 RGB/BGR 图片和 I420 YUV 帧输入流程。
+- 相同模型再次运行时自动复用 engine 缓存，减少重复构建等待。
+- 输出带检测结果的图片，并报告延迟、FPS 和各阶段性能数据。
+- 同时提供脚本化操作方式和面向系统集成的 C++ 接口。
 
 **中文目录**
 
 点击下方章节链接可在本文档内跳转：
 
 - [快速开始](#快速开始)
-- [仓库结构](#仓库结构)
-- [Demo 说明](#demo-说明)
-- [项目文档](#项目文档)
 - [环境依赖](#环境依赖)
 - [构建方式](#构建方式)
 - [运行方式](#运行方式)
-- [直接运行二进制](#直接运行二进制)
-- [代码执行流程](#代码执行流程)
-- [关键源码](#关键源码)
-- [可复用组件](#可复用组件)
-- [如何适配自己的应用](#如何适配自己的应用)
+- [交付内容](#交付内容)
+- [工作负载指南](#工作负载指南)
+- [项目文档](#项目文档)
+- [高级用法：直接运行可执行程序](#高级用法直接运行可执行程序)
+- [处理流程](#处理流程)
+- [集成参考](#集成参考)
+- [集成能力](#集成能力)
+- [应用集成](#应用集成)
+- [附录：支持的模型与 ONNX 导出](#附录支持的模型与-onnx-导出)
 
 ## 快速开始
 
-在仓库根目录执行。`scripts/build.sh` 会在默认模型缺失时自动下载并校验 `weights/yolov5s.onnx`。
+在应用根目录执行以下命令。如果您的 ONNX 文件名不同，请替换模型路径。
 
 ```shell
 scripts/build.sh
-scripts/run.sh
+scripts/run.sh -o weights/yolov5s_sim.onnx
 ```
 
-执行成功后，程序会打印 RGB 和 YUV demo 在 warmup 之后稳定的阶段耗时和 FPS，并在 `build/output` 下生成绘制结果。
+执行成功后，应用会报告 RGB 和 YUV 工作负载在 warmup 后的延迟与 FPS，并在 `build/output` 下保存带检测结果的图片。
 
 标准脚本如下：
 
 | 脚本 | 用途 |
 |---|---|
-| `scripts/build.sh` | 在需要时下载默认模型，清理上一次构建产物，执行 CMake 配置并编译工程。 |
-| `scripts/run.sh` | 默认运行全部 demo，也支持选择单个 demo 并配置模型、输入、输出和 loop 次数。 |
-| `scripts/benchmark.sh` | 默认对全部 demo 执行重复测量 loop，并自动保存完整日志。 |
+| `scripts/build.sh` | 清理上一次构建产物，执行 CMake 配置并编译应用；不检查、下载或校验模型。 |
+| `scripts/run.sh` | 运行全部工作负载，或选择单一工作负载并配置模型、输入、输出和测量次数。 |
+| `scripts/benchmark.sh` | 对一个或全部工作负载执行重复测量，并保存完整性能日志。 |
 
-常用首次检查命令：
+运行单一输入格式或启动性能测试：
 
 ```shell
-scripts/run.sh --demo rgb
-scripts/run.sh --demo yuv
-scripts/benchmark.sh
+scripts/run.sh -o weights/yolov5s_sim.onnx --demo rgb
+scripts/run.sh -o weights/yolov5s_sim.onnx --demo yuv
+scripts/benchmark.sh -o weights/yolov5s_sim.onnx --demo rgb --loop 20
 ```
 
-`scripts/run.sh` 会从仓库根目录解析路径。默认会串行运行 `rgb` 和 `yuv`，使用 `weights/yolov5s.onnx`，从 `build/assets` 读取输入，并将绘制结果写入 `build/output`。如果 `/usr/local/rpp/bin/rpp_server` 存在，脚本会在启动 demo 前保证该服务已运行，并将 server 日志写入 `build/logs/rpp_server.log`。
+`scripts/run.sh` 会从应用根目录解析路径。默认串行运行 `rgb` 和 `yuv` 工作负载，使用 `weights/yolov5s.onnx`，从 `build/assets` 读取输入，并将标注结果写入 `build/output`。如果系统安装了 `/usr/local/rpp/bin/rpp_server`，脚本会在推理前确保服务可用，并将日志写入 `build/logs/rpp_server.log`。
 
 `scripts/benchmark.sh` 会将完整控制台日志保存到 `build/logs/benchmark_<demo>_<timestamp>.log`。
 
-## 仓库结构
+## 交付内容
 
 本节中带链接的路径可点击跳转到对应 README。
 
 - `CMakeLists.txt`
-  根构建入口。负责配置公共依赖，并构建可复用库和 demo 可执行文件。
+  应用可执行程序和公共运行库的主构建配置。
 - `src/perf/`
-  可选的 `rpp_perf` trace 会话封装。该功能只有在 CMake 配置 `-DYOLO_ENABLE_RPP_PERF=ON` 时生效；启用 perf 的 demo 构建会自动在 `build/trace` 下保存 trace 文件。
+  可选的 `rpp_perf` 性能追踪能力。使用 `-DYOLO_ENABLE_RPP_PERF=ON` 构建时启用，并将 trace 文件保存到 `build/trace`。
 - `src/utils/`
-  日志、ONNX 解析辅助、buffer 辅助、命令行和路径工具。
+  公共日志、ONNX 解析、buffer 管理、命令行和路径工具。
 - `src/yolov5/`
   YOLOv5 业务相关代码，包括标签、检测结果类型、可视化和 pipeline 组装。
 - [`rpp/`](rpp/README.md)
-  面向 RPP 硬件执行路径的模块，包括 OpenRT 推理、前处理 kernel/模块和后处理模块。
+  基于 RPP 加速的推理、前处理和后处理组件。
 - `demos/`
-  demo 可执行入口，包括 RGB 图片和 I420 YUV 帧 demo。
+  RGB 图片和 I420 YUV 帧工作负载的应用程序源码。
 - [`docs/`](docs/README.md)
   公开项目文档、logo 资源和 API 文档入口。
 - `scripts/`
-  标准构建、运行和 benchmark 命令入口。
+  面向客户的构建、推理和性能测量命令。
 - `assets/`
-  示例输入资源，构建时会复制到 `build/assets/`，便于快速验证。
+  参考 RGB 图片和 I420 帧，配置时复制到 `build/assets/`。
 - `weights/`
   本地模型放置目录。目录本身保留在 Git 中，但模型文件不会提交。
 - `3rd_party/`
-  demo 命令行解析使用的 `argparse` header-only 三方库。
+  应用可执行程序使用的 `argparse` header-only 依赖。
 
-本仓库不在 Git 中跟踪 ONNX 模型文件。`scripts/build.sh` 会在需要时从 `xdltek/onnx_model_tool` 下载 `weights/yolov5s.onnx` 并进行 MD5 校验。可视化使用的类别名称来自 `src/yolov5/labels.cpp` 中内置的 MS COCO 80 类列表 `coco80_class_labels()`，顺序与标准 YOLOv5 COCO 预训练模型一致。
+ONNX 模型由客户单独提供，不随 Git 交付。编译过程与模型是否存在无关，也不会下载或校验 ONNX。运行时可通过 `-o/--onnx` 传入模型；未传入时，仅在 `weights/yolov5s.onnx` 存在的情况下使用该默认模型。检测结果使用 `src/yolov5/labels.cpp` 中内置的 MS COCO 80 类名称，顺序与标准 YOLOv5 COCO 预训练模型一致。
 
-## Demo 说明
+## 工作负载指南
 
-根 README 说明公共构建方式和整体架构。每个 demo 目录下还有独立说明文档，用于描述对应输入格式、命令行参数、执行流程和输出结果：
+每种受支持的工作负载都提供独立指南，说明输入格式、命令行参数、处理流程和预期输出：
 
-点击文档路径可跳转到对应 demo 说明：
+请根据所需输入格式选择指南：
 
-- [RGB 图片 demo](demos/rgb_image/README.md)：RGB/BGR 图片 demo 说明。
-- [I420 YUV 帧 demo](demos/yuv_frame/README.md)：I420 YUV 帧 demo 说明。
+- [RGB 图片工作负载](demos/rgb_image/README.md)：RGB/BGR 图片推理。
+- [I420 YUV 帧工作负载](demos/yuv_frame/README.md)：I420 YUV 帧推理。
 
 ## 项目文档
 
 点击文档路径可跳转到对应说明：
 
 - [项目文档入口](docs/README.md)：公开文档入口。
-- [API 文档](docs/api/README.md)：可复用 API 索引。
-- [RPP 加速模块](rpp/README.md)：RPP 模块说明。
-- [性能 trace 辅助模块](src/perf/README.md)：perf trace 说明。
+- [API 文档](docs/api/README.md)：集成 API 索引。
+- [RPP 加速组件](rpp/README.md)：加速处理参考。
+- [性能追踪](src/perf/README.md)：可选 trace 配置与输出说明。
 
 ## 环境依赖
 
-构建前请确认环境中已具备：
+构建应用前，请确认环境满足以下要求：
 
 - Linux 开发环境
 - CMake `>= 3.16.3`
@@ -391,23 +457,18 @@ scripts/benchmark.sh
 - OpenCV 以及本项目需要的组件
 - 安装在 `/usr/local/rpp` 下的 openRT
 - 目标 RPP 加速卡运行所需的运行时库
-- 当 `scripts/build.sh` 需要下载默认模型时，需要 `wget` 和 `md5sum`
 
 如果 openRT 安装路径不同，请同步修改 `CMakeLists.txt` 中的相关路径配置。
 
 ## 构建方式
 
-在仓库根目录执行：
+在应用根目录执行：
 
 ```shell
 scripts/build.sh
 ```
 
-如果 `weights/yolov5s.onnx` 不存在，构建脚本会下载默认模型并校验：
-
-```shell
-12f4516124a90056f01692bae254ec6a  weights/yolov5s.onnx
-```
+编译不需要 ONNX 模型；执行推理或性能测量时才需要准备受支持的模型。
 
 构建完成后，可执行文件默认生成在：
 
@@ -419,36 +480,48 @@ build/bin/yolov5_yuv_frame_demo
 构建产物按类型归类：
 
 ```text
-build/bin/      demo 可执行文件
-build/lib/      libyolov5_core.so、librpp_inference.so、librpp_yolo_preprocess.so、librpp_yolo_postprocess.so 以及辅助库
-build/assets/   复制后的示例输入
+build/bin/      应用可执行程序
+build/lib/      应用运行库和 RPP 加速库
+build/assets/   参考输入文件
 build/output/   绘制检测框后的输出图片
 build/trace/    可选的 rpp_perf trace 文件
 ```
 
 ## 运行方式
 
-构建完成后，在仓库根目录运行 demo。默认模型路径为 `weights/yolov5s.onnx`；只有使用其他模型时才需要通过 `--model` 指定。
+构建完成后，在应用根目录运行。建议显式指定 ONNX 模型路径；若省略 `-o/--onnx`，脚本仅在 `weights/yolov5s.onnx` 存在时使用该默认模型。
+
+| 参数 | 说明 | 默认值 |
+|---|---|---|
+| `-o, --onnx PATH` | 静态维度、已简化的 YOLOv5 ONNX 模型 | 存在时使用 `weights/yolov5s.onnx` |
+| `-d, --demo NAME` | 运行范围：`all`、`rgb` 或 `yuv` | `all` |
+| `-i, --input PATH` | 输入图片或 I420 YUV 文件 | 对应工作负载的参考输入 |
+| `--output PATH` | 绘制检测结果的输出图片 | `build/output/output_<demo>.jpg` |
+| `-l, --loop COUNT` | warmup 后的测量帧数 | `1` |
 
 ```shell
-scripts/run.sh
+scripts/run.sh -o weights/yolov5s_sim.onnx
+scripts/run.sh -o weights/yolov5s_sim.onnx --demo rgb \
+  -i /path/to/input.jpg \
+  --output build/output/result.jpg
 ```
 
-默认情况下，`scripts/run.sh` 会串行运行 RGB 和 YUV demo。需要运行单个 demo 或传入自定义输入/输出路径时，使用 `--demo rgb` 或 `--demo yuv`。
+默认情况下，`scripts/run.sh` 串行运行 RGB 和 YUV 工作负载。使用 `--demo rgb` 或 `--demo yuv` 可选择单一工作负载或传入自定义输入/输出路径。参数名 `--demo` 为保持命令行兼容性而保留。
 
 Benchmark 使用相同的默认模型和输入：
 
 ```shell
-scripts/benchmark.sh
-scripts/benchmark.sh --demo rgb --loop 20
-scripts/benchmark.sh --demo yuv --loop 20
+scripts/benchmark.sh -o weights/yolov5s_sim.onnx --demo rgb --loop 20
+scripts/benchmark.sh -o weights/yolov5s_sim.onnx --demo yuv --loop 20
 ```
 
 每个脚本都支持 `-h` 和 `--help`。
 
-## 直接运行二进制
+## 高级用法：直接运行可执行程序
 
-推荐第一次使用时通过脚本运行，因为脚本会统一解析路径并保护 `rpp_server` 启动流程。构建完成后，也可以从仓库根目录直接执行 demo 二进制，并显式传入路径：
+脚本是推荐的客户使用方式，可统一解析路径并管理 `rpp_server` 启动。系统集成场景也可以直接运行应用可执行程序，并显式传入路径：
+
+脚本和 C++ 可执行程序统一使用 `-o/--onnx` 指定模型，使用 `--output` 指定标注结果图片。输入数据方面，应用脚本使用 `-i/--input`，RGB 可执行程序使用 `-i/--image`，YUV 可执行程序使用 `--yuv`。
 
 ```shell
 build/bin/yolov5_rgb_image_demo \
@@ -468,14 +541,14 @@ build/bin/yolov5_yuv_frame_demo \
 
 直接运行二进制时，如果当前 RPP 环境需要 `rpp_server`，请先确认该服务已在后台运行。
 
-完整参数和预期输出请参考各 demo 文档：
+完整参数和预期输出请参考工作负载指南：
 
-点击文档路径可跳转到对应 demo 说明：
+请选择对应的工作负载指南：
 
-- [RGB 图片 demo](demos/rgb_image/README.md)：RGB/BGR 图片 demo 说明。
-- [I420 YUV 帧 demo](demos/yuv_frame/README.md)：I420 YUV 帧 demo 说明。
+- [RGB 图片工作负载](demos/rgb_image/README.md)：RGB/BGR 图片推理。
+- [I420 YUV 帧工作负载](demos/yuv_frame/README.md)：I420 YUV 帧推理。
 
-## 代码执行流程
+## 处理流程
 
 ```text
 +------------------------+
@@ -513,26 +586,26 @@ build/bin/yolov5_yuv_frame_demo \
 +------------------------+
 ```
 
-## 关键源码
+## 集成参考
 
-本节中带链接的源码路径可点击跳转到对应模块 README。
+以下组件提供主要的 C++ 集成接口：
 
 - [`rpp/inference/rpp_infer_engine.*`](rpp/inference/README.md)
-  通用 OpenRT on RPP 推理封装。负责解析 ONNX、构建执行 engine、分配 buffer 并执行推理。
+  OpenRT on RPP 推理组件，负责模型加载、engine 初始化、buffer 分配和推理执行。
 - [`rpp/preprocess/rpp_yolo_preprocessor.*`](rpp/preprocess/README.md)
-  RGB/BGR/I420 输入的 RPP 前处理模块和 kernel。
+  RGB、BGR 和 I420 输入的 RPP 前处理。
 - [`rpp/postprocess/rpp_yolo_postprocessor.*`](rpp/postprocess/README.md)
-  YOLO 输出切分和 NMS 的 RPP 后处理模块。
+  YOLO 输出解码和 NMS 的 RPP 后处理。
 - [`src/yolov5/yolo_pipeline.*`](src/yolov5/README.md)
   YOLOv5 pipeline 组装层。每次调用执行一次 RPP 前处理、推理和 RPP 后处理，不隐藏 warmup。
 - `src/perf/perf_trace_session.*`
-  使用 `-DYOLO_ENABLE_RPP_PERF=ON` 构建时自动启用的可选 rpp_perf trace 封装。
+  使用 `-DYOLO_ENABLE_RPP_PERF=ON` 启用的可选 `rpp_perf` 性能追踪能力。
 - `demos/rgb_image/main.cpp`
-  RGB/BGR 图片 demo 入口。
+  RGB/BGR 图片应用可执行程序。
 - `demos/yuv_frame/main.cpp`
-  I420 YUV 帧 demo 入口。
+  I420 YUV 帧应用可执行程序。
 
-## 可复用组件
+## 集成能力
 
 - 模型和图片选择的命令行参数组织方式
 - YOLOv5 风格模型的输入前处理逻辑
@@ -540,9 +613,50 @@ build/bin/yolov5_yuv_frame_demo \
 - RPP 执行路径中的 host/device buffer 使用方式
 - 检测结果解码、NMS 和图片可视化逻辑
 
-## 如何适配自己的应用
+## 应用集成
 
-- 使用 `-o` 指向自己的 YOLOv5 兼容 ONNX 模型。
+- 使用 `scripts/run.sh -o/--onnx` 指定受支持的 YOLOv5 ONNX 模型，使用 `--output` 指定绘制结果的输出图片路径。
 - 如果模型类别顺序或数据集不同于 COCO 80，请修改 `src/yolov5/labels.cpp` 中的 `coco80_class_labels()`，或替换为自己的类别表。
-- 将示例图片路径替换为自己的输入源。
-- 复用 `rpp/inference/RppInferEngine`、`src/yolov5/YoloV5Pipeline` 和 demo 中的参数/计时模式，作为自定义 RPP 推理应用的起点。
+- 将参考图片路径替换为目标输入源。
+- 将 `rpp/inference/RppInferEngine` 和 `src/yolov5/YoloV5Pipeline` 集成到目标 RPP 推理流程。
+
+## 附录：支持的模型与 ONNX 导出
+
+### 支持的模型系列
+
+当前支持通过 Ultralytics 官方 [YOLOv5 仓库](https://github.com/ultralytics/yolov5) 导出的以下经典 YOLOv5 模型：
+
+| 模型 | 常用权重文件名 | 支持状态 |
+| :--- | :--- | :--- |
+| YOLOv5n | `yolov5n.pt` | 支持 |
+| YOLOv5s | `yolov5s.pt` | 支持 |
+| YOLOv5m | `yolov5m.pt` | 支持 |
+| YOLOv5l | `yolov5l.pt` | 支持 |
+| YOLOv5x | `yolov5x.pt` | 支持 |
+
+当前版本不支持以下 Ultralytics 模型：
+
+- YOLOv5u：`yolov5nu`、`yolov5su`、`yolov5mu`、`yolov5lu`、`yolov5xu`。
+- YOLOv5 P6-u：`yolov5n6u`、`yolov5s6u`、`yolov5m6u`、`yolov5l6u`、`yolov5x6u`。
+
+### ONNX 导出要求
+
+本产品仅支持静态输入维度的 ONNX 模型。导出后必须使用 `onnxsim` 简化模型，并且不要使用 YOLOv5 的 `--dynamic` 导出参数。
+
+```shell
+git clone https://github.com/ultralytics/yolov5.git
+cd yolov5
+pip install -r requirements.txt
+pip install onnx onnxruntime onnxsim
+
+python export.py \
+  --weights yolov5s.pt \
+  --include onnx \
+  --imgsz 640 640 \
+  --batch-size 1 \
+  --opset 12
+
+python -m onnxsim yolov5s.onnx yolov5s_sim.onnx
+```
+
+可根据需要将 `yolov5s.pt` 替换为 `yolov5n.pt`、`yolov5m.pt`、`yolov5l.pt` 或 `yolov5x.pt`，并同步修改 `onnxsim` 命令中的两个文件名。运行本产品时，请使用生成的 `*_sim.onnx` 文件。

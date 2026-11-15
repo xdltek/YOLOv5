@@ -4,12 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Keep the default model local and ignored by Git. The build script only makes
-# sure the expected demo model exists before CMake config starts.
-DEFAULT_MODEL_DIR="${ROOT_DIR}/weights"
-DEFAULT_MODEL_PATH="${DEFAULT_MODEL_DIR}/yolov5s.onnx"
-DEFAULT_MODEL_URL="https://raw.githubusercontent.com/xdltek/onnx_model_tool/main/examples/onnx/yolov5s.onnx"
-DEFAULT_MODEL_MD5="12f4516124a90056f01692bae254ec6a"
 CMAKE_GENERATOR_NAME="Unix Makefiles"
 
 show_help() {
@@ -19,37 +13,8 @@ Usage: scripts/build.sh [options]
 Options:
   -b, --build-dir DIR   Build directory. Default: build
       --perf            Enable YOLO_ENABLE_RPP_PERF.
-      --skip-model      Do not download or verify the default YOLOv5s ONNX model.
   -h, --help            Show this help message.
 EOF
-}
-
-ensure_default_model() {
-    mkdir -p "${DEFAULT_MODEL_DIR}"
-
-    # Reuse an existing model only when the checksum matches the released file.
-    if [[ -f "${DEFAULT_MODEL_PATH}" ]] &&
-        echo "${DEFAULT_MODEL_MD5}  ${DEFAULT_MODEL_PATH}" | md5sum -c -
-    then
-        return 0
-    fi
-
-    if [[ -f "${DEFAULT_MODEL_PATH}" ]]; then
-        echo "Default model checksum mismatch; re-downloading ${DEFAULT_MODEL_PATH}"
-    fi
-
-    if ! command -v wget >/dev/null 2>&1; then
-        echo "wget is required to download ${DEFAULT_MODEL_URL}" >&2
-        exit 1
-    fi
-
-    # Download to a temporary file first so an interrupted fetch never replaces
-    # a valid model path with a partial ONNX file.
-    local tmp_model="${DEFAULT_MODEL_PATH}.tmp"
-    echo "Downloading default model: ${DEFAULT_MODEL_URL}"
-    wget -O "${tmp_model}" "${DEFAULT_MODEL_URL}"
-    echo "${DEFAULT_MODEL_MD5}  ${tmp_model}" | md5sum -c -
-    mv "${tmp_model}" "${DEFAULT_MODEL_PATH}"
 }
 
 resolve_repo_path() {
@@ -123,7 +88,6 @@ ensure_compatible_build_dir() {
 
 build_dir="build"
 enable_perf="OFF"
-skip_model="OFF"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -133,10 +97,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --perf)
             enable_perf="ON"
-            shift
-            ;;
-        --skip-model)
-            skip_model="ON"
             shift
             ;;
         -h|--help)
@@ -150,10 +110,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-
-if [[ "${skip_model}" != "ON" ]]; then
-    ensure_default_model
-fi
 
 # Resolve after argument parsing so every downstream path uses one canonical
 # build directory value.

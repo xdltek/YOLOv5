@@ -4,19 +4,25 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# RPP SDK installations that ship rpp_server need it alive before demo launch.
+# RPP SDK installations that ship rpp_server require it before application launch.
 # If this binary is absent, the script leaves server management to the runtime.
 RPP_SERVER_BIN="/usr/local/rpp/bin/rpp_server"
+
+if [[ "${YOLO_COLOR:-always}" != "never" ]]; then
+    BLUE=$'\033[1;34m'; CYAN=$'\033[1;36m'; GREEN=$'\033[1;32m'; RED=$'\033[1;31m'; RESET=$'\033[0m'
+else
+    BLUE=""; CYAN=""; GREEN=""; RED=""; RESET=""
+fi
 
 show_help() {
     cat <<'EOF'
 Usage: scripts/run.sh [options]
 
 Options:
-  -m, --model PATH      ONNX model path. Default: weights/yolov5s.onnx
-  -d, --demo NAME       Demo to run: all, rgb, or yuv. Default: all
+  -o, --onnx PATH       ONNX model path. Uses weights/yolov5s.onnx when present.
+  -d, --demo NAME       Workload to run: all, rgb, or yuv. Default: all
   -i, --input PATH      RGB image path or I420 YUV path.
-  -o, --output PATH     Rendered output path.
+      --output PATH     Rendered output path.
   -b, --build-dir DIR   Build directory. Default: build
   -l, --loop COUNT      Measured loop count. Default: 1
       --yuv-width N     I420 width for yuv demo. Default: 1280
@@ -99,15 +105,31 @@ run_demo() {
             ;;
     esac
 
-    echo "Demo: ${selected_demo}"
-    echo "Binary: ${bin}"
-    echo "Model: ${model}"
-    echo "Input: ${selected_input}"
-    echo "Output: ${selected_output}"
+    if [[ ! -x "${bin}" ]]; then
+        echo "${RED}[ERROR   ]${RESET} Application executable not found: ${bin}" >&2
+        echo "${CYAN}[ACTION  ]${RESET} Build the project first with: scripts/build.sh" >&2
+        exit 1
+    fi
+
+    printf '%s' "${BLUE}"
+    cat <<EOF
+
++------------------------------------------------------------------+
+|         XDL AI ACCELERATION - YOLOv5 OBJECT DETECTION            |
++------------------------------------------------------------------+
+  Workload                 : ${selected_demo^^} image inference
+  Model                    : ${model}
+  Input                    : ${selected_input}
+  Measured frames          : ${loop_count} (+ 1 warmup)
+  Result image             : ${selected_output}
++------------------------------------------------------------------+
+EOF
+    printf '%s' "${RESET}"
+    echo "${CYAN}[START   ]${RESET} Launching accelerated inference pipeline"
     "${bin}" "${args[@]}"
 }
 
-model="weights/yolov5s.onnx"
+model=""
 demo="all"
 input=""
 output=""
@@ -118,7 +140,7 @@ yuv_height="720"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -m|--model)
+        -o|--onnx)
             model="$2"
             shift 2
             ;;
@@ -130,7 +152,7 @@ while [[ $# -gt 0 ]]; do
             input="$2"
             shift 2
             ;;
-        -o|--output)
+        --output)
             output="$2"
             shift 2
             ;;
@@ -162,7 +184,28 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ ! "${loop_count}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "${RED}[ERROR   ]${RESET} --loop must be a positive integer." >&2
+    exit 1
+fi
+
+if [[ -z "${model}" ]]; then
+    default_model="${ROOT_DIR}/weights/yolov5s.onnx"
+    if [[ -f "${default_model}" ]]; then
+        model="${default_model}"
+        echo "${GREEN}[MODEL   ]${RESET} --onnx not specified; using default: ${model}"
+    else
+        echo "${RED}[ERROR   ]${RESET} No model was specified and the default model does not exist: ${default_model}" >&2
+        echo "${CYAN}[ACTION  ]${RESET} Pass an ONNX model explicitly with: scripts/run.sh --onnx /path/to/model.onnx" >&2
+        exit 1
+    fi
+fi
+
 model="$(resolve_repo_path "${model}")"
+if [[ ! -f "${model}" ]]; then
+    echo "${RED}[ERROR   ]${RESET} ONNX model not found: ${model}" >&2
+    exit 1
+fi
 build_dir="$(resolve_repo_path "${build_dir}")"
 
 case "${demo}" in
@@ -170,7 +213,7 @@ case "${demo}" in
         # A single custom input path cannot represent both BGR image and I420
         # frame inputs, so require an explicit single-demo selection.
         if [[ -n "${input}" || -n "${output}" ]]; then
-            echo "--input and --output require --demo rgb or --demo yuv when running a single demo." >&2
+            echo "--input and --output require --demo rgb or --demo yuv when running a single workload." >&2
             exit 1
         fi
         ensure_rpp_server

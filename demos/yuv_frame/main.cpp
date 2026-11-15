@@ -3,6 +3,7 @@
  * @brief YOLOv5 I420 YUV frame demo.
  */
 #include "argparse/argparse.hpp"
+#include "demo_reporter.h"
 #include "labels.h"
 #include "logger.h"
 #include "perf_trace_session.h"
@@ -31,44 +32,6 @@ constexpr bool kPerfTraceEnabled = false;
 constexpr const char* kPerfTraceDir = "../trace";
 
 /**
- * @brief Convert byte counts to KiB for the latency summary.
- * @param bytes Number of bytes transferred.
- */
-double bytes_to_kib(size_t bytes)
-{
-    return static_cast<double>(bytes) / 1024.0;
-}
-
-/**
- * @brief Print the measured full-pipeline timing summary after warmup.
- * @param times Averaged stage timings collected from measured loops.
- * @param loop_count Number of measured loops included in the average.
- * @param output_path Path where the rendered detection image was saved.
- */
-void print_summary(const YoloV5StageTimes& times, int loop_count, const std::string& output_path)
-{
-    // FPS is derived from the end-to-end latency measured after warmup.
-    double fps = times.end_to_end_ms > 0.0 ? 1000.0 / times.end_to_end_ms : 0.0;
-    std::cout << std::fixed << std::setprecision(3)
-              << "\nSummary:\n"
-              << "Loop count: " << loop_count << "\n"
-              << "Loop time: average per measured loop after warmup\n"
-              << "Input H2D: " << times.input_h2d_ms << " ms, "
-              << times.input_h2d_bytes << " bytes, "
-              << bytes_to_kib(times.input_h2d_bytes) << " KiB\n"
-              << "Preprocess: " << times.preprocess_ms << " ms\n"
-              << "Inference: " << times.inference_ms << " ms\n"
-              << "Postprocess: " << times.postprocess_ms << " ms\n"
-              << "Output D2H: " << times.output_d2h_ms << " ms, "
-              << times.output_d2h_bytes << " bytes, "
-              << bytes_to_kib(times.output_d2h_bytes) << " KiB\n"
-              << "All time end to end: " << times.end_to_end_ms
-              << " ms (preprocess+inference+postprocess)\n"
-              << "FPS: " << fps << "\n"
-              << "Output path: " << output_path << std::endl;
-}
-
-/**
  * @brief Average accumulated stage timings across measured loops.
  * @param total Sum of all measured loop timings.
  * @param count Number of measured loops.
@@ -93,14 +56,14 @@ YoloV5StageTimes average_times(const YoloV5StageTimes& total, int count)
 }
 
 /**
- * @brief Run the I420 YUV image demo from CLI parsing through rendered output.
+ * @brief Run the I420 YUV application from CLI parsing through rendered output.
  * @param argc Number of command-line arguments.
  * @param argv Command-line argument values.
  */
 int main(int argc, char** argv)
 {
-    // Step 1: declare the command-line contract for this demo.
-    argparse::ArgumentParser program("yolov5 yuv frame demo", "0.1", argparse::default_arguments::help);
+    // Step 1: declare the command-line contract for this application.
+    argparse::ArgumentParser program("YOLOv5 I420 YUV application", "0.1", argparse::default_arguments::help);
 
     program.add_argument("-o", "--onnx")
             .default_value(std::string("../../weights/yolov5s.onnx"))
@@ -172,8 +135,7 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    std::cout << "Model path: " << model_path << "\n"
-              << "Inference YUV path: " << yuv_path << std::endl;
+    demo_reporter::print_stage("LOAD", "Reading I420 YUV input frame");
 
     // I420 stores full-size Y plus quarter-size U and V planes.
     size_t yuv_bytes = static_cast<size_t>(yuv_width) * static_cast<size_t>(yuv_height) * 3U / 2U;
@@ -201,12 +163,14 @@ int main(int argc, char** argv)
 
     YoloV5Pipeline pipeline;
     const std::vector<std::string>& class_list = coco80_class_labels();
+    demo_reporter::print_stage("INIT", "Building OpenRT inference engine on RPP accelerator");
     if (!pipeline.init(pipeline_options, class_list)) {
         return EXIT_FAILURE;
     }
 
     // Run one complete pass before measurement so printed latency reflects warmed execution.
     std::vector<Detection> warmup_output;
+    demo_reporter::print_stage("WARMUP", "Running 1 unmeasured frame for stable performance");
     {
         PERF_SCOPE_CATE("demo_warmup_run", "yolov5");
         if (!pipeline.runI420(yuv_data.data(), yuv_data.size(), yuv_width, yuv_height, warmup_output, nullptr)) {
@@ -217,6 +181,8 @@ int main(int argc, char** argv)
     // Step 8: run the measured loop and accumulate stage timings for a stable average.
     std::vector<Detection> output;
     YoloV5StageTimes total_times;
+    demo_reporter::print_stage("BENCH", "Measuring " + std::to_string(repeat_count) + " full-pipeline frames");
+    auto progress_start = demo_reporter::Clock::now();
     for (int i = 0; i < repeat_count; ++i) {
         PERF_SCOPE_CATE("demo_measured_loop", "yolov5");
         YoloV5StageTimes loop_times;
@@ -231,6 +197,7 @@ int main(int argc, char** argv)
         total_times.inference_ms += loop_times.inference_ms;
         total_times.postprocess_ms += loop_times.postprocess_ms;
         total_times.end_to_end_ms += loop_times.end_to_end_ms;
+        demo_reporter::print_progress(i + 1, repeat_count, progress_start);
     }
 
     // Step 9: render the last measured detections onto the BGR view of the input YUV frame.
@@ -240,6 +207,6 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    print_summary(average_times(total_times, repeat_count), repeat_count, output_path);
+    demo_reporter::print_summary(average_times(total_times, repeat_count), repeat_count, output.size(), output_path);
     return EXIT_SUCCESS;
 }

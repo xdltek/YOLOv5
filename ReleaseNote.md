@@ -48,7 +48,8 @@ This release note records only the final differences between the current code an
 - Updated postprocessing to run YOLOv5 output processing and NMS on RPP instead of the baseline CPU-side demo path.
 - Updated demo execution to use explicit initialization, one warmup pass, measured loops, rendered output, and stage-level timing.
 - Updated timing output to report H2D and D2H transfer time separately; FPS is calculated from the printed preprocess + inference + postprocess latency.
-- Updated model handling so the repository does not track ONNX files. `scripts/build.sh` prepares the default `weights/yolov5s.onnx` model by download and MD5 verification when needed.
+- Decoupled compilation from model preparation. `scripts/build.sh` no longer checks, downloads, or verifies ONNX files; run and benchmark scripts use the C++-consistent `-o/--onnx` option and fall back to `weights/yolov5s.onnx` only when it exists.
+- Added content-keyed OpenRT engine caching with explicit build/reuse runtime logs.
 - Updated `scripts/run.sh` so the default mode runs both RGB and YUV demos serially. Single-demo execution remains available through `--demo rgb` or `--demo yuv`.
 - Updated `scripts/benchmark.sh` so the default benchmark covers all demos and saves logs under `build/logs/`.
 - Updated documentation style so README files are bilingual and module/document links use explicit clickable path descriptions.
@@ -113,7 +114,8 @@ This release note records only the final differences between the current code an
 - 后处理更新为在 RPP 上执行 YOLOv5 输出处理和 NMS，不再使用基准版本的 CPU 侧 demo 后处理路径。
 - demo 执行流程更新为显式初始化、一次 warmup、多轮测量、结果绘制和阶段级耗时输出。
 - 计时输出更新为单独打印 H2D 和 D2H 传输耗时；FPS 使用打印的前处理 + 推理 + 后处理耗时计算。
-- 模型处理更新为仓库不跟踪 ONNX 文件。`scripts/build.sh` 会在需要时下载并 MD5 校验默认 `weights/yolov5s.onnx`。
+- 编译与模型准备解耦。`scripts/build.sh` 不再检查、下载或校验 ONNX；run 和 benchmark 脚本与 C++ 统一使用 `-o/--onnx`，且仅在 `weights/yolov5s.onnx` 存在时使用默认模型。
+- 新增基于模型内容的 OpenRT engine 缓存，并在运行日志中明确打印新建或复用状态。
 - `scripts/run.sh` 默认串行运行 RGB 和 YUV 两个 demo；仍可通过 `--demo rgb` 或 `--demo yuv` 运行单个 demo。
 - `scripts/benchmark.sh` 默认覆盖全部 demo，并将日志保存到 `build/logs/`。
 - 文档更新为双语 README，并统一模块和文档跳转链接的可点击路径描述。
