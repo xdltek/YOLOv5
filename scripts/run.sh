@@ -19,14 +19,14 @@ show_help() {
 Usage: scripts/run.sh [options]
 
 Options:
-  -o, --onnx PATH       ONNX model path. Uses weights/yolov5s.onnx when present.
-  -d, --demo NAME       Workload to run: all, rgb, or yuv. Default: all
+  -m, --model PATH      ONNX model path. Required unless weights/yolov5s.onnx exists.
+  -d, --demo NAME       Workload selector: all, rgb, or yuv. Default: all
   -i, --input PATH      RGB image path or I420 YUV path.
-      --output PATH     Rendered output path.
+  -o, --output PATH     Rendered output path.
   -b, --build-dir DIR   Build directory. Default: build
   -l, --loop COUNT      Measured loop count. Default: 1
-      --yuv-width N     I420 width for yuv demo. Default: 1280
-      --yuv-height N    I420 height for yuv demo. Default: 720
+      --yuv-width N     I420 width for the YUV workload. Default: 1280
+      --yuv-height N    I420 height for the YUV workload. Default: 720
   -h, --help            Show this help message.
 EOF
 }
@@ -71,14 +71,14 @@ ensure_rpp_server() {
     fi
 }
 
-run_demo() {
-    local selected_demo="$1"
+run_workload() {
+    local selected_workload="$1"
     local selected_input="$2"
     local selected_output="$3"
     local bin
     local args
 
-    case "${selected_demo}" in
+    case "${selected_workload}" in
         rgb)
             # Default RGB assets are copied into build/assets during CMake config.
             bin="${build_dir}/bin/yolov5_rgb_image_demo"
@@ -86,8 +86,8 @@ run_demo() {
             [[ -z "${selected_output}" ]] && selected_output="${build_dir}/output/output_rgb.jpg"
             selected_input="$(resolve_repo_path "${selected_input}")"
             selected_output="$(resolve_repo_path "${selected_output}")"
-            args=(-o "${model}" -l "${loop_count}")
-            args+=(-i "${selected_input}" --output "${selected_output}")
+            args=(-m "${model}" -l "${loop_count}")
+            args+=(-i "${selected_input}" -o "${selected_output}")
             ;;
         yuv)
             # The bundled YUV sample is a single packed I420 frame.
@@ -96,8 +96,8 @@ run_demo() {
             [[ -z "${selected_output}" ]] && selected_output="${build_dir}/output/output_yuv.jpg"
             selected_input="$(resolve_repo_path "${selected_input}")"
             selected_output="$(resolve_repo_path "${selected_output}")"
-            args=(-o "${model}" -l "${loop_count}" --yuv-width "${yuv_width}" --yuv-height "${yuv_height}")
-            args+=(--yuv "${selected_input}" --output "${selected_output}")
+            args=(-m "${model}" -l "${loop_count}" --yuv-width "${yuv_width}" --yuv-height "${yuv_height}")
+            args+=(-i "${selected_input}" -o "${selected_output}")
             ;;
         *)
             echo "--demo must be all, rgb, or yuv." >&2
@@ -117,7 +117,7 @@ run_demo() {
 +------------------------------------------------------------------+
 |         XDL AI ACCELERATION - YOLOv5 OBJECT DETECTION            |
 +------------------------------------------------------------------+
-  Workload                 : ${selected_demo^^} image inference
+  Workload                 : ${selected_workload^^} image inference
   Model                    : ${model}
   Input                    : ${selected_input}
   Measured frames          : ${loop_count} (+ 1 warmup)
@@ -130,7 +130,7 @@ EOF
 }
 
 model=""
-demo="all"
+workload="all"
 input=""
 output=""
 build_dir="build"
@@ -140,19 +140,19 @@ yuv_height="720"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -o|--onnx)
+        -m|--model)
             model="$2"
             shift 2
             ;;
         -d|--demo)
-            demo="$2"
+            workload="$2"
             shift 2
             ;;
         -i|--input)
             input="$2"
             shift 2
             ;;
-        --output)
+        -o|--output)
             output="$2"
             shift 2
             ;;
@@ -193,10 +193,11 @@ if [[ -z "${model}" ]]; then
     default_model="${ROOT_DIR}/weights/yolov5s.onnx"
     if [[ -f "${default_model}" ]]; then
         model="${default_model}"
-        echo "${GREEN}[MODEL   ]${RESET} --onnx not specified; using default: ${model}"
+        echo "${GREEN}[MODEL   ]${RESET} --model not specified; using default: ${model}"
     else
-        echo "${RED}[ERROR   ]${RESET} No model was specified and the default model does not exist: ${default_model}" >&2
-        echo "${CYAN}[ACTION  ]${RESET} Pass an ONNX model explicitly with: scripts/run.sh --onnx /path/to/model.onnx" >&2
+        echo "${RED}[ERROR   ]${RESET} No ONNX model was specified." >&2
+        echo "${CYAN}[DETAIL  ]${RESET} This package does not include a model, and the optional fallback was not found: ${default_model}" >&2
+        echo "${CYAN}[ACTION  ]${RESET} Provide one with: scripts/run.sh --model /path/to/model.onnx" >&2
         exit 1
     fi
 fi
@@ -208,22 +209,22 @@ if [[ ! -f "${model}" ]]; then
 fi
 build_dir="$(resolve_repo_path "${build_dir}")"
 
-case "${demo}" in
+case "${workload}" in
     all)
         # A single custom input path cannot represent both BGR image and I420
-        # frame inputs, so require an explicit single-demo selection.
+        # frame inputs, so require an explicit single-workload selection.
         if [[ -n "${input}" || -n "${output}" ]]; then
             echo "--input and --output require --demo rgb or --demo yuv when running a single workload." >&2
             exit 1
         fi
         ensure_rpp_server
-        # Run default demos serially so logs and output files remain predictable.
-        run_demo rgb "" ""
-        run_demo yuv "" ""
+        # Run default workloads serially so logs and output files remain predictable.
+        run_workload rgb "" ""
+        run_workload yuv "" ""
         ;;
     rgb|yuv)
         ensure_rpp_server
-        run_demo "${demo}" "${input}" "${output}"
+        run_workload "${workload}" "${input}" "${output}"
         ;;
     *)
         echo "--demo must be all, rgb, or yuv." >&2

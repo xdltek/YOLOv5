@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16.3)
 
-project(yolov5_demo_workspace VERSION 1.0)
+project(yolov5_rpp_application VERSION 2.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)

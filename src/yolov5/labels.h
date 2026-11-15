@@ -16,7 +16,7 @@ const std::vector<std::string>& coco80_class_labels();
 /**
  * @brief Resolve a class id to display text for rendered detections.
  * @param class_id Detection class id.
- * @param names Class-name table supplied by the demo.
+ * @param names Class-name table supplied by the application.
  */
 std::string detection_class_label(int class_id, const std::vector<std::string>& names);
 

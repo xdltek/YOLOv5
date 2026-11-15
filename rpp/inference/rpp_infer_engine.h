@@ -19,7 +19,7 @@ class RppInferEngine
 public:
     /**
      * @brief Store the ONNX path used during runtime engine initialization.
-     * @param onnx_path Path to a YOLO-compatible ONNX model file.
+     * @param onnx_path Path to a supported ONNX model file.
      */
     explicit RppInferEngine(const std::string& onnx_path)
         : onnx_model_path_(onnx_path) {}

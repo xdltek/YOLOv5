@@ -77,6 +77,10 @@ void reset_profile(RppPreprocessProfile* profile)
  */
 RppYoloPreprocessor::~RppYoloPreprocessor()
 {
+    if (run_stream_ != nullptr) {
+        rtStreamDestroy(run_stream_);
+        run_stream_ = nullptr;
+    }
     // Release persistent DDR and pinned host staging buffers owned by this preprocessor.
     if (host_input_device_ != nullptr) {
         rtFree(host_input_device_);
@@ -94,16 +98,11 @@ RppYoloPreprocessor::~RppYoloPreprocessor()
  */
 void RppYoloPreprocessor::releaseSramBuffers()
 {
-    // SRAM is temporary workspace; release it after preprocessing so postprocess can allocate its own workspace.
+    // These buffers persist across frames and are released only when this preprocessor is replaced.
     if (input_sram_ != nullptr) {
         rtFreeSram(input_sram_);
         input_sram_ = nullptr;
         input_sram_capacity_ = 0;
-    }
-    if (rgb_chw_sram_ != nullptr) {
-        rtFreeSram(rgb_chw_sram_);
-        rgb_chw_sram_ = nullptr;
-        rgb_chw_sram_capacity_ = 0;
     }
     if (model_input_sram_ != nullptr) {
         rtFreeSram(model_input_sram_);
@@ -127,6 +126,9 @@ bool RppYoloPreprocessor::init(int max_input_width, int max_input_height, int mo
     max_input_height_ = max_input_height;
     model_width_ = model_width;
     model_height_ = model_height;
+    if (run_stream_ == nullptr && !check_rt(rtStreamCreate(&run_stream_), "rtStreamCreate preprocess")) {
+        return false;
+    }
     return true;
 }
 
@@ -146,23 +148,17 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
         return false;
     }
 
-    // Reuse an external stream when the pipeline wants to compose stages; otherwise own the stream locally.
-    rtStream_t run_stream = stream;
-    bool owns_stream = false;
+    // Use one persistent stream by default. The pipeline can still provide a composed stream.
+    rtStream_t run_stream = stream != nullptr ? stream : run_stream_;
     if (run_stream == nullptr) {
-        if (!check_rt(rtStreamCreate(&run_stream), "rtStreamCreate")) {
-            return false;
-        }
-        owns_stream = true;
+        std::cerr << "RPP preprocessing stream has not been initialized." << std::endl;
+        return false;
     }
 
-    // Stage source data in device DDR first; device inputs can pass through without another H2D copy.
+    // Stage host input in reusable device DDR; device inputs pass through without an H2D copy.
     void* device_input = nullptr;
     auto stage_start = ProfileClock::now();
     if (!copyHostInputToDevice(input, run_stream, &device_input)) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
         return false;
     }
     if (profile != nullptr) {
@@ -173,118 +169,76 @@ bool RppYoloPreprocessor::run(const PreprocessInput& input,
     }
     auto preprocess_start = ProfileClock::now();
 
-    // Move input DDR into SRAM because the RPP kernels operate on temporary SRAM workspace.
+    // Allocate SRAM workspace once and reuse it across independent preprocessing calls.
     size_t input_bytes = rpp_preprocess_input_bytes(input.format, input.width, input.height);
+    size_t model_input_bytes = static_cast<size_t>(model_width_) *
+                               static_cast<size_t>(model_height_) *
+                               3U *
+                               sizeof(float);
     if (!ensureSramBuffer(&input_sram_, &input_sram_capacity_, input_bytes)) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
-        return false;
-    }
-    if (!check_rt(rtMemcpy(input_sram_, device_input, input_bytes, rtMemcpyDeviceToSram), "rtMemcpy input DDR to SRAM")) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
         return false;
     }
 
     // Save letterbox metadata so postprocessing can map boxes back to the original source size.
     letterbox = make_letterbox_info(input.width, input.height, model_width_, model_height_);
 
-    size_t model_input_bytes = static_cast<size_t>(model_width_) *
-                               static_cast<size_t>(model_height_) *
-                               3U *
-                               sizeof(float);
     if (!ensureSramBuffer(&model_input_sram_, &model_input_sram_capacity_, model_input_bytes)) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
         return false;
     }
     if (profile != nullptr) {
         profile->model_input_clear_ms = 0.0;
     }
 
-    // Launch the format-specific resize/normalize kernel and write NCHW float data in SRAM.
+    // Queue the complete preprocessing stage directly on one stream. This remains a plain
+    // preprocess -> OpenRT inference -> postprocess pipeline and does not use graph capture.
     stage_start = ProfileClock::now();
-    if (input.format == PreprocessInputFormat::YUV_I420) {
-        launch_letterbox_resize_norm_i420_to_nchw_f32(run_stream,
-                                                      input_sram_,
-                                                      input.width,
-                                                      input.height,
-                                                      static_cast<float*>(model_input_sram_),
-                                                      model_width_,
-                                                      model_height_,
-                                                      letterbox.resized_width,
-                                                      letterbox.resized_height,
-                                                      letterbox.scale,
-                                                      letterbox.pad_x,
-                                                      letterbox.pad_y);
-    }
-    else if (input.format == PreprocessInputFormat::RGB_CHW) {
-        launch_letterbox_resize_norm_chw_u8_to_nchw_f32(run_stream,
-                                                        input_sram_,
-                                                        input.width,
-                                                        input.height,
-                                                        static_cast<float*>(model_input_sram_),
-                                                        model_width_,
-                                                        model_height_,
-                                                        letterbox.resized_width,
-                                                        letterbox.resized_height,
-                                                        letterbox.scale,
-                                                        letterbox.pad_x,
-                                                        letterbox.pad_y);
-    }
-    else {
-        bool input_is_bgr = input.format == PreprocessInputFormat::BGR_HWC;
-        launch_letterbox_resize_norm_hwc_u8_to_nchw_f32(run_stream,
-                                                        input_sram_,
-                                                        input.width,
-                                                        input.height,
-                                                        input_is_bgr,
-                                                        static_cast<float*>(model_input_sram_),
-                                                        model_width_,
-                                                        model_height_,
-                                                        letterbox.resized_width,
-                                                        letterbox.resized_height,
-                                                        letterbox.scale,
-                                                        letterbox.pad_x,
-                                                        letterbox.pad_y);
-    }
-
-    if (!check_rt(rtGetLastError(), "RPP preprocessing kernel launch")) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
+    if (!check_rt(rtMemcpyAsync(input_sram_,
+                                device_input,
+                                input_bytes,
+                                rtMemcpyDeviceToSram,
+                                run_stream),
+                  "rtMemcpyAsync preprocess DDR to SRAM")) {
         return false;
     }
 
-    if (!check_rt(rtStreamSynchronize(run_stream), "rtStreamSynchronize preprocess kernels")) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
+    if (input.format == PreprocessInputFormat::YUV_I420) {
+        launch_letterbox_resize_norm_i420_to_nchw_f32(run_stream, input_sram_,
+            input.width, input.height, static_cast<float*>(model_input_sram_),
+            model_width_, model_height_, letterbox.resized_width, letterbox.resized_height,
+            letterbox.scale, letterbox.pad_x, letterbox.pad_y);
+    }
+    else if (input.format == PreprocessInputFormat::RGB_CHW) {
+        launch_letterbox_resize_norm_chw_u8_to_nchw_f32(run_stream, input_sram_,
+            input.width, input.height, static_cast<float*>(model_input_sram_),
+            model_width_, model_height_, letterbox.resized_width, letterbox.resized_height,
+            letterbox.scale, letterbox.pad_x, letterbox.pad_y);
+    }
+    else {
+        launch_letterbox_resize_norm_hwc_u8_to_nchw_f32(run_stream, input_sram_,
+            input.width, input.height, input.format == PreprocessInputFormat::BGR_HWC,
+            static_cast<float*>(model_input_sram_), model_width_, model_height_,
+            letterbox.resized_width, letterbox.resized_height, letterbox.scale,
+            letterbox.pad_x, letterbox.pad_y);
+    }
+    if (!check_rt(rtGetLastError(), "RPP preprocessing kernel launch") ||
+        !check_rt(rtMemcpyAsync(model_input_device,
+                               model_input_sram_,
+                               model_input_bytes,
+                               rtMemcpySramToDevice,
+                               run_stream),
+                  "rtMemcpyAsync preprocess SRAM to model input")) {
+        return false;
+    }
+    if (!check_rt(rtStreamSynchronize(run_stream), "rtStreamSynchronize preprocess")) {
         return false;
     }
     if (profile != nullptr) {
         profile->resize_normalize_ms = elapsed_ms(stage_start);
     }
-    // Copy normalized model input from SRAM back to the runtime binding in device DDR.
-    if (!check_rt(rtMemcpy(model_input_device, model_input_sram_, model_input_bytes, rtMemcpySramToDevice),
-                  "rtMemcpy model input SRAM to DDR")) {
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
-        return false;
-    }
     if (profile != nullptr) {
         profile->total_ms = elapsed_ms(preprocess_start);
     }
-
-    bool ok = true;
-    if (owns_stream) {
-        check_rt(rtStreamDestroy(run_stream), "rtStreamDestroy");
-    }
-    return ok;
+    return true;
 }
 
 /**
@@ -447,7 +401,7 @@ bool RppYoloPreprocessor::validateInput(const PreprocessInput& input) const
  */
 size_t rpp_preprocess_input_bytes(PreprocessInputFormat format, int width, int height)
 {
-    // The byte count must match the raw host buffer layout accepted by each demo.
+    // The byte count must match the raw host buffer layout accepted by each application.
     if (width <= 0 || height <= 0) {
         return 0;
     }

@@ -1,14 +1,14 @@
 <a id="english"></a>
 
-# RGB Image YOLOv5 Demo
+# YOLOv5 RGB Image Application
 
 Language switch: click [English](#english) or [中文](#chinese) to jump to the corresponding section.
 
-This demo runs one RGB/BGR image through the reusable YOLOv5 RPP pipeline per measured loop. It is a simple entry point for validating model loading, host-to-device input transfer, RPP preprocessing, openRT inference, RPP postprocessing, device-to-host result transfer, and rendered detection output.
+This application runs one RGB/BGR image through the reusable YOLOv5 RPP pipeline per measured loop. It provides a ready-to-use entry point for model loading, host-to-device input transfer, RPP preprocessing, OpenRT inference, RPP postprocessing, device-to-host result transfer, and rendered detection output.
 
-## What This Demo Covers
+## Application Scope
 
-- Load a YOLOv5-compatible ONNX model.
+- Load a validated classic YOLOv5 P5 or P6 ONNX model.
 - Read an image with OpenCV.
 - Run one explicit warmup pass.
 - Run measured inference loops and print stage-level latency.
@@ -31,42 +31,42 @@ build/bin/yolov5_rgb_image_demo
 
 ## Run
 
-Run the RGB demo from the repository root with the standard script:
+Run the RGB application from the repository root with the standard script:
 
 ```shell
-scripts/run.sh --demo rgb
+scripts/run.sh -m /path/to/yolov5s.onnx --demo rgb
 ```
 
-Run a measured benchmark for the RGB demo:
+Run a measured benchmark for the RGB workload:
 
 ```shell
-scripts/benchmark.sh --demo rgb --loop 20
+scripts/benchmark.sh -m /path/to/yolov5s.onnx --demo rgb --loop 20
 ```
 
-The script uses the default model at `weights/yolov5s.onnx`, the copied input image at `build/assets/test_1.png`, and the output path `build/output/output_rgb.jpg`.
+The release package does not include an ONNX model, so provide one with `-m/--model`. If the option is omitted, the script uses `weights/yolov5s.onnx` only when the user has placed that file there; otherwise it reports the missing model and exits. The default input and output paths are `build/assets/test_1.png` and `build/output/output_rgb.jpg`.
 
 To use another image through the script:
 
 ```shell
-scripts/run.sh --demo rgb --input /path/to/image.jpg
+scripts/run.sh -m /path/to/yolov5s.onnx --demo rgb --input /path/to/image.jpg
 ```
 
 After building, the binary can also be executed directly:
 
 ```shell
 build/bin/yolov5_rgb_image_demo \
-  -o weights/yolov5s.onnx \
+  -m /path/to/yolov5s.onnx \
   -i build/assets/test_1.png \
-  --output build/output/output_rgb.jpg \
+  -o build/output/output_rgb.jpg \
   -l 1
 ```
 
 ## Arguments
 
 ```text
--o, --onnx      ONNX model path. Default: ../../weights/yolov5s.onnx
--i, --image     RGB/BGR image path. Default: ../assets/test_1.png
---output        Rendered output image path. Default: ../output/output_rgb.jpg
+-m, --model     ONNX model path. Required.
+-i, --input     RGB/BGR image path. Default: ../assets/test_1.png
+-o, --output    Rendered output image path. Default: ../output/output_rgb.jpg
 -l, --loop      Measured loop count after one warmup pass. Default: 1
 -v, --verbose   Enable verbose runtime logging.
 ```
@@ -97,10 +97,10 @@ Draw boxes and save rendered image
 
 ## Output
 
-The demo prints model and input paths first, then a timing summary:
+The application prints model and input paths first, then a timing summary:
 
 ```text
-Model path: ../../weights/yolov5s.onnx
+Model path: /path/to/yolov5s.onnx
 Inference image path: ../assets/test_1.png
 
 Summary:
@@ -112,11 +112,12 @@ Inference: <ms> ms
 Postprocess: <ms> ms
 Output D2H: <ms> ms, <bytes> bytes, <KiB> KiB
 All time end to end: <ms> ms (preprocess+inference+postprocess)
-FPS: <fps>
+End-to-end FPS: <fps>
+OpenRT inference FPS: <fps>
 Output path: ../output/output_rgb.jpg
 ```
 
-`Input H2D` and `Output D2H` are printed separately. FPS is calculated from the reported preprocess + inference + postprocess latency.
+`End-to-end FPS` is calculated from the reported preprocess + inference + postprocess latency. `OpenRT inference FPS` is calculated from the standalone OpenRT engine execution latency. Both are emphasized at the top of the performance report. `Input H2D` and `Output D2H` remain available as separate transfer fields.
 
 The rendered image is saved to `build/output/output_rgb.jpg` by default.
 
@@ -129,21 +130,21 @@ Click a document path below to jump to the corresponding guide:
 
 ## Reuse Notes
 
-Use this demo when your application already receives compressed or decoded image files on the host. For new applications, copy the CLI pattern and call `YoloV5Pipeline::runRgb()` with your own `cv::Mat`.
+Use this workload when the integrating application already receives compressed or decoded image files on the host. Call `YoloV5Pipeline::runRgb()` with the target `cv::Mat` when integrating the pipeline.
 
 ---
 
 <a id="chinese"></a>
 
-# RGB 图片 YOLOv5 Demo
+# YOLOv5 RGB 图片应用
 
 语言切换：点击 [English](#english) 或 [中文](#chinese) 跳转到对应语言章节。
 
-本 demo 在每次测量 loop 中，将一张 RGB/BGR 图片送入可复用的 YOLOv5 RPP pipeline。它是一个简单的执行入口，可用于验证模型加载、输入 H2D、RPP 前处理、openRT 推理、RPP 后处理、结果 D2H 以及检测框绘制输出。
+本应用在每次测量 loop 中，将一张 RGB/BGR 图片送入可复用的 YOLOv5 RPP pipeline，提供模型加载、输入 H2D、RPP 前处理、OpenRT 推理、RPP 后处理、结果 D2H 以及检测框绘制输出的完整执行入口。
 
-## 这个 Demo 包含什么
+## 应用范围
 
-- 加载 YOLOv5 兼容 ONNX 模型。
+- 加载本版本验证的经典 YOLOv5 P5 或 P6 ONNX 模型。
 - 使用 OpenCV 读取图片。
 - 显式执行一次完整 warmup。
 - 执行指定次数的测量 loop，并打印阶段级耗时。
@@ -166,42 +167,42 @@ build/bin/yolov5_rgb_image_demo
 
 ## 运行
 
-从仓库根目录使用标准脚本运行 RGB demo：
+从仓库根目录使用标准脚本运行 RGB 应用：
 
 ```shell
-scripts/run.sh --demo rgb
+scripts/run.sh -m /path/to/yolov5s.onnx --demo rgb
 ```
 
-执行 RGB demo benchmark：
+执行 RGB 工作负载 benchmark：
 
 ```shell
-scripts/benchmark.sh --demo rgb --loop 20
+scripts/benchmark.sh -m /path/to/yolov5s.onnx --demo rgb --loop 20
 ```
 
-脚本默认使用 `weights/yolov5s.onnx` 模型、`build/assets/test_1.png` 输入图片，并将结果保存到 `build/output/output_rgb.jpg`。
+发布包不包含 ONNX 模型，请通过 `-m/--model` 指定模型。如果省略该参数，脚本仅在用户已放置 `weights/yolov5s.onnx` 时使用该文件，否则会提示模型缺失并退出。默认输入和输出路径分别为 `build/assets/test_1.png` 和 `build/output/output_rgb.jpg`。
 
 通过脚本使用其他图片：
 
 ```shell
-scripts/run.sh --demo rgb --input /path/to/image.jpg
+scripts/run.sh -m /path/to/yolov5s.onnx --demo rgb --input /path/to/image.jpg
 ```
 
 构建完成后，也可以直接执行二进制：
 
 ```shell
 build/bin/yolov5_rgb_image_demo \
-  -o weights/yolov5s.onnx \
+  -m /path/to/yolov5s.onnx \
   -i build/assets/test_1.png \
-  --output build/output/output_rgb.jpg \
+  -o build/output/output_rgb.jpg \
   -l 1
 ```
 
 ## 参数
 
 ```text
--o, --onnx      ONNX 模型路径。默认：../../weights/yolov5s.onnx
--i, --image     RGB/BGR 图片路径。默认：../assets/test_1.png
---output        绘制检测框后的输出图片路径。默认：../output/output_rgb.jpg
+-m, --model     ONNX 模型路径。必需。
+-i, --input     RGB/BGR 图片路径。默认：../assets/test_1.png
+-o, --output    绘制检测框后的输出图片路径。默认：../output/output_rgb.jpg
 -l, --loop      warmup 之后的测量 loop 次数。默认：1
 -v, --verbose   开启更详细的运行时日志。
 ```
@@ -232,10 +233,10 @@ Warmup：完整执行一次 pipeline
 
 ## 输出
 
-demo 会优先打印模型路径和输入路径，然后打印汇总耗时：
+应用会优先打印模型路径和输入路径，然后打印汇总耗时：
 
 ```text
-Model path: ../../weights/yolov5s.onnx
+Model path: /path/to/yolov5s.onnx
 Inference image path: ../assets/test_1.png
 
 Summary:
@@ -247,11 +248,12 @@ Inference: <ms> ms
 Postprocess: <ms> ms
 Output D2H: <ms> ms, <bytes> bytes, <KiB> KiB
 All time end to end: <ms> ms (preprocess+inference+postprocess)
-FPS: <fps>
+End-to-end FPS: <fps>
+OpenRT inference FPS: <fps>
 Output path: ../output/output_rgb.jpg
 ```
 
-`Input H2D` 和 `Output D2H` 会单独打印。FPS 使用打印的前处理 + 推理 + 后处理耗时计算。
+`End-to-end FPS` 根据前处理 + 推理 + 后处理耗时计算，`OpenRT inference FPS` 根据单独的 OpenRT engine 执行耗时计算。两项指标会在性能报告顶部重点展示；`Input H2D` 和 `Output D2H` 仍作为独立传输指标打印。
 
 默认输出图片保存到 `build/output/output_rgb.jpg`。
 
@@ -264,4 +266,4 @@ Output path: ../output/output_rgb.jpg
 
 ## 复用说明
 
-当应用侧已经在 host 上拿到压缩图片或解码后的图片时，可以参考这个 demo。新应用可以复用这里的命令行组织方式，并使用自己的 `cv::Mat` 调用 `YoloV5Pipeline::runRgb()`。
+当集成方已经在 host 上获得压缩图片或解码后的图片时，可使用该工作负载。集成 pipeline 时，使用目标 `cv::Mat` 调用 `YoloV5Pipeline::runRgb()`。

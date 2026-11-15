@@ -47,13 +47,13 @@ void perf_trace_begin(const char* name, const char* category);
 void perf_trace_end(const char* name, const char* category);
 
 /**
- * @brief RAII owner for an optional demo-level rpp_perf trace session.
+ * @brief RAII owner for an optional application-level rpp_perf trace session.
  */
 class PerfTraceSession
 {
 public:
     /**
-     * @brief Own a demo-level trace session controlled by build configuration.
+     * @brief Own an application-level trace session controlled by build configuration.
      * @param prefix Prefix used by rpp_perf when naming trace output.
      * @param enabled Whether trace capture should be active.
      * @param output_dir Directory where trace files should be written.

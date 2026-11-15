@@ -38,7 +38,7 @@ struct YoloV5PipelineOptions
 };
 
 /**
- * @brief Stage-level timing summary reported by demos after one measured pipeline run.
+ * @brief Stage-level timing summary reported by applications after one measured pipeline run.
  */
 struct YoloV5StageTimes
 {

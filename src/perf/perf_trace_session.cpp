@@ -21,7 +21,7 @@ bool g_driver_trace_enabled = false;
 }
 
 /**
- * @brief Start a process-wide rpp_perf trace window when enabled by the demo.
+ * @brief Start a process-wide rpp_perf trace window when enabled by the application.
  */
 bool perf_trace_start(const char* prefix, bool enabled, const char* output_dir)
 {
@@ -112,7 +112,7 @@ bool perf_trace_enable_driver(unsigned int mode)
         return false;
     }
 
-    // rppLogsDumpToTraceWindows streams device/runtime records into this demo trace window.
+    // rppLogsDumpToTraceWindows streams device/runtime records into this application trace window.
     RPPresult result = rppLogsDumpToTraceWindows(g_trace_window, mode);
     if (result != RPP_SUCCESS) {
         std::cerr << "Failed to enable RPP driver trace, RPPresult="

@@ -9,6 +9,7 @@
 #include "sampleCommon.h"
 
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -165,11 +166,17 @@ bool RppInferEngine::init()
         std::cerr << "Unable to parse ONNX model file: " << onnx_model_path_ << std::endl;
         return false;
     }
-    if (onnx_parser(onnx_model_path_, builder.get(), network.get(), parser.get()) != 0) {
+    try {
+        if (onnx_parser(onnx_model_path_, builder.get(), network.get(), parser.get()) != 0) {
+            return false;
+        }
+    }
+    catch (const std::exception& error) {
+        std::cerr << "OpenRT could not import the ONNX model: " << error.what() << std::endl;
         return false;
     }
 
-    // Build a single-batch BF16-capable engine for the demo inference path.
+    // Build a single-batch BF16-capable engine while preserving the ONNX tensor boundary.
     builder->setMaxBatchSize(1);
     config->setMaxWorkspaceSize((size_t)1_GiB);
     config->setFlag(BuilderFlag::kBF16);
@@ -244,7 +251,7 @@ void* RppInferEngine::getOutputDeviceBuffer() const
  */
 bool RppInferEngine::executeContext()
 {
-    // Synchronous execution is the inference timing region reported by the demos.
+    // Synchronous execution is the inference timing region reported by the applications.
     if (context_ptr_ == nullptr || buffer_ptr_ == nullptr) {
         sample::LOG_ERROR() << "RPP inference engine has not been initialized." << std::endl;
         return false;

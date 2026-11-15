@@ -9,9 +9,10 @@ This module prepares YOLOv5 model input tensors on RPP.
 ## Responsibilities
 
 - Validate host or device input metadata.
-- Copy host input through a pinned host staging buffer when needed.
+- Copy host input through a reusable pinned staging buffer.
 - Compute YOLO letterbox scale and padding.
 - Convert input format, resize, and normalize into NCHW model layout.
+- Reuse the runtime stream and SRAM workspaces across frames.
 - Report H2D and preprocessing timings.
 
 ## Supported Formats
@@ -20,10 +21,8 @@ This module prepares YOLOv5 model input tensors on RPP.
 - `RGB_HWC`
 - `RGB_CHW`
 - `YUV_I420`
-- `NV12`
-- `NV21`
-
-The current demos use `BGR_HWC` for RGB image input and `YUV_I420` for raw frame input.
+The current applications use `BGR_HWC` for RGB image input and `YUV_I420` for raw frame input.
+`NV12` and `NV21` are reserved enum values and are rejected until format-specific kernels are provided.
 
 ## Main API
 
@@ -32,13 +31,15 @@ The current demos use `BGR_HWC` for RGB image input and `YUV_I420` for raw frame
 - `RppYoloPreprocessor::run()`
   Runs one preprocessing pass into the model input device buffer.
 - `RppYoloPreprocessor::releaseSramBuffers()`
-  Releases temporary SRAM workspaces after a pipeline pass.
+  Explicitly releases persistent SRAM workspaces when an integration needs to return the memory early.
 - `make_letterbox_info()`
   Computes geometry metadata shared with postprocessing.
 
 ## Reuse Notes
 
-Use this module when the target model expects YOLOv5-style letterbox and normalized NCHW input. Keep model labels, detection parsing, and visualization outside preprocessing.
+Use this module when the model exposes a static FP32 NCHW input and expects YOLOv5-style letterbox plus `[0, 1]` normalization. The implementation is a conventional preprocessing stage: it uses local SDK runtime calls and source kernels, but does not use graph capture or graph execution.
+
+An INT8 Q/DQ ONNX model can use the same preprocessor only when its external input remains FP32 NCHW and its external output remains FP32. Raw INT8 input bindings require model-specific scale and zero-point handling and are not accepted by this application. Model parser support must still be verified with the target OpenRT SDK and the actual quantized model.
 
 ---
 
@@ -53,9 +54,10 @@ Use this module when the target model expects YOLOv5-style letterbox and normali
 ## 模块职责
 
 - 校验 host 或 device 输入元数据。
-- 在需要时通过页锁定 Host 中转缓冲区复制输入。
+- 通过可复用的页锁定 Host 中转缓冲区复制输入。
 - 计算 YOLO letterbox 缩放比例和 padding。
 - 完成格式转换、resize、归一化，并写入 NCHW 模型输入布局。
+- 跨帧复用 runtime stream 和 SRAM workspace。
 - 上报 H2D 和前处理耗时。
 
 ## 支持格式
@@ -64,10 +66,8 @@ Use this module when the target model expects YOLOv5-style letterbox and normali
 - `RGB_HWC`
 - `RGB_CHW`
 - `YUV_I420`
-- `NV12`
-- `NV21`
-
-当前 demo 使用 `BGR_HWC` 处理 RGB 图片输入，使用 `YUV_I420` 处理原始帧输入。
+当前应用使用 `BGR_HWC` 处理 RGB 图片输入，使用 `YUV_I420` 处理原始帧输入。
+`NV12` 和 `NV21` 目前仅为预留枚举值，在提供对应 kernel 前会被明确拒绝。
 
 ## 主要 API
 
@@ -76,10 +76,12 @@ Use this module when the target model expects YOLOv5-style letterbox and normali
 - `RppYoloPreprocessor::run()`
   执行一次前处理，并写入模型输入 device buffer。
 - `RppYoloPreprocessor::releaseSramBuffers()`
-  在一次 pipeline 完成后释放临时 SRAM workspace。
+  在集成方需要提前归还内存时，显式释放持久化 SRAM workspace。
 - `make_letterbox_info()`
   计算与后处理共享的几何信息。
 
 ## 复用说明
 
-当目标模型使用 YOLOv5 风格 letterbox 和归一化 NCHW 输入时，可复用本模块。模型标签、检测解析和可视化逻辑应放在前处理模块之外。
+当模型使用静态 FP32 NCHW 外部输入，并要求 YOLOv5 风格 letterbox 与 `[0, 1]` 归一化时，可复用本模块。该实现是常规独立前处理阶段，仅使用本地 SDK runtime API 与源码 kernel，不使用 Graph capture 或 Graph 执行。
+
+INT8 Q/DQ ONNX 只有在外部输入仍为 FP32 NCHW、外部输出仍为 FP32 时，才可以复用相同前处理。原始 INT8 输入 binding 需要模型专属的 scale 和 zero-point 处理，本应用当前不接受。仍需使用目标 OpenRT SDK 和实际量化模型验证 parser 兼容性。

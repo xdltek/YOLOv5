@@ -74,7 +74,9 @@ inline void print_summary(const YoloV5StageTimes& times,
                           size_t detection_count,
                           const std::string& output_path)
 {
-    double fps = times.end_to_end_ms > 0.0 ? 1000.0 / times.end_to_end_ms : 0.0;
+    double end_to_end_fps = times.end_to_end_ms > 0.0 ? 1000.0 / times.end_to_end_ms : 0.0;
+    // Report engine execution throughput independently from full-pipeline throughput.
+    double inference_fps = times.inference_ms > 0.0 ? 1000.0 / times.inference_ms : 0.0;
     double total_ms = times.end_to_end_ms * static_cast<double>(loop_count);
     double input_kib = static_cast<double>(times.input_h2d_bytes) / 1024.0;
     double output_kib = static_cast<double>(times.output_d2h_bytes) / 1024.0;
@@ -83,8 +85,12 @@ inline void print_summary(const YoloV5StageTimes& times,
               << "\n+------------------------------------------------------------------+\n"
               << "|                 YOLOv5 PERFORMANCE REPORT                       |\n"
               << "+------------------------------------------------------------------+\n" << color(kReset)
-              << color(kBold) << "  KEY RESULTS\n" << color(kReset)
-              << "  Throughput              : " << color(kGreen) << fps << " FPS" << color(kReset) << "\n"
+              << color(kBold) << color(kCyan) << "  PERFORMANCE HIGHLIGHTS\n" << color(kReset)
+              << color(kBold) << "  End-to-end FPS           : " << color(kGreen)
+              << end_to_end_fps << " FPS" << color(kReset) << "\n"
+              << color(kBold) << "  OpenRT inference FPS     : " << color(kGreen)
+              << inference_fps << " FPS" << color(kReset) << "\n"
+              << color(kBold) << "\n  MEASUREMENT DETAILS\n" << color(kReset)
               << "  End-to-end latency       : " << color(kGreen) << times.end_to_end_ms
               << " ms / frame" << color(kReset) << "\n"
               << "  Measured frames          : " << loop_count << " (+ 1 warmup)\n"

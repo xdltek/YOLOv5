@@ -2,8 +2,6 @@
 
 #include "perf_trace_session.h"
 
-#include <nms_pre_slice.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -93,15 +91,6 @@ int dims_volume(const infer1::Dims& dims)
 int score_channels(const RppYoloPostprocessConfig& config)
 {
     return config.output_dimensions - 4;
-}
-
-/**
- * @brief Convert a host pointer value into the device-pointer integer type expected by nms_pre_slice.
- * @param ptr Device pointer stored as a host-side address value.
- */
-RPPdeviceptr as_rpp_deviceptr(const void* ptr)
-{
-    return static_cast<RPPdeviceptr>(reinterpret_cast<std::uintptr_t>(ptr));
 }
 
 /**
@@ -198,8 +187,10 @@ bool RppYoloPostprocessor::init(const RppYoloPostprocessConfig& config)
         std::cerr << "Invalid RPP YOLO postprocess dimensions." << std::endl;
         return false;
     }
-    if (config.output_dimensions < config.class_count + 5) {
-        std::cerr << "YOLO output dimensions do not match class count." << std::endl;
+    if (config.output_dimensions != config.class_count + 5) {
+        std::cerr << "Unsupported YOLO output contract: expected exactly four box values, "
+                  << "one objectness value, and " << config.class_count
+                  << " class scores per row." << std::endl;
         return false;
     }
     if (config.confidence_threshold < 0.0f || config.score_threshold < 0.0f ||
@@ -215,8 +206,9 @@ bool RppYoloPostprocessor::init(const RppYoloPostprocessConfig& config)
     initialized_ = false;
 
     try {
-        // Build runtime subgraphs and allocate all persistent postprocess buffers.
-        if (!buildNmsEngine() || !buildCastEngine()) {
+        // Fuse cast, slicing, and NMS into one SDK runtime engine to avoid three
+        // independent device submissions on every frame.
+        if (!buildFusedPostprocessEngine()) {
             releaseBuffers();
             resetEngines();
             return false;
@@ -239,135 +231,112 @@ bool RppYoloPostprocessor::init(const RppYoloPostprocessConfig& config)
 }
 
 /**
- * @brief Build the runtime network that casts YOLO FP32 output to BF16 for addNMS.
+ * @brief Build one SDK runtime engine for cast, boxes/scores slicing, and NMS.
  */
-bool RppYoloPostprocessor::buildCastEngine()
+bool RppYoloPostprocessor::buildFusedPostprocessEngine()
 {
-    PERF_SCOPE_CATE("rpp_yolo_postprocess_build_cast_engine", "postprocess");
-    // Build a tiny identity network that casts YOLO float output to BF16 for RPP NMS.
+    PERF_SCOPE_CATE("rpp_yolo_postprocess_build_fused_engine", "postprocess");
     std::unique_ptr<infer1::IBuilder> builder {infer1::createInferBuilder(rpp_postprocess_logger())};
     if (builder == nullptr) {
-        std::cerr << "Failed to create RPP postprocess cast builder." << std::endl;
+        std::cerr << "Failed to create RPP fused postprocess builder." << std::endl;
         return false;
     }
     std::unique_ptr<infer1::INetworkDefinition> network {builder->createNetwork()};
     if (network == nullptr) {
-        std::cerr << "Failed to create RPP postprocess cast network." << std::endl;
+        std::cerr << "Failed to create RPP fused postprocess network." << std::endl;
         return false;
     }
     std::unique_ptr<infer1::IBuilderConfig> builder_config {builder->createBuilderConfig()};
     if (builder_config == nullptr) {
-        std::cerr << "Failed to create RPP postprocess cast builder config." << std::endl;
+        std::cerr << "Failed to create RPP fused postprocess builder config." << std::endl;
         return false;
     }
 
-    // The cast engine preserves the YOLO output shape while changing the element type.
-    infer1::Dims output_dims{};
-    output_dims.nbDims = 2;
-    output_dims.d[0] = config_.output_rows;
-    output_dims.d[1] = config_.output_dimensions;
-
-    infer1::ITensor* input = network->addInput("cast_input", infer1::DataType::kFLOAT, output_dims);
-    if (input == nullptr) {
-        std::cerr << "Failed to create RPP postprocess cast input." << std::endl;
-        return false;
-    }
-    infer1::IIdentityLayer* identity = network->addIdentity(*input);
-    if (identity == nullptr) {
-        std::cerr << "Failed to create RPP postprocess cast identity." << std::endl;
-        return false;
-    }
-    identity->setPrecision(infer1::DataType::kBF);
-    identity->setOutputType(0, infer1::DataType::kBF);
-    identity->getOutput(0)->setType(infer1::DataType::kBF);
-    identity->getOutput(0)->setName("cast_output");
-    network->markOutput(*identity->getOutput(0));
-
-    // Compile the cast network once and keep its execution context for every frame.
-    builder->setMaxBatchSize(1);
-    builder_config->setMaxWorkspaceSize(static_cast<size_t>(16) << 20);
-    builder_config->setFlag(infer1::BuilderFlag::kBF16);
-
-    try {
-        cast_engine_.reset(builder->buildEngineWithConfig(*network, *builder_config));
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Failed to build RPP postprocess cast engine: " << e.what() << std::endl;
-        throw;
-    }
-    if (cast_engine_ == nullptr) {
-        std::cerr << "Failed to build RPP postprocess cast engine." << std::endl;
-        return false;
-    }
-    cast_context_.reset(cast_engine_->createExecutionContext());
-    if (cast_context_ == nullptr) {
-        std::cerr << "Failed to create RPP postprocess cast context." << std::endl;
+    infer1::Dims yolo_dims{};
+    yolo_dims.nbDims = 2;
+    yolo_dims.d[0] = config_.output_rows;
+    yolo_dims.d[1] = config_.output_dimensions;
+    infer1::ITensor* yolo_output = network->addInput("fused_yolo_output",
+                                                     infer1::DataType::kFLOAT,
+                                                     yolo_dims);
+    if (yolo_output == nullptr) {
+        std::cerr << "Failed to create RPP fused postprocess input." << std::endl;
         return false;
     }
 
-    cast_input_index_ = cast_engine_->getBindingIndex("cast_input");
-    cast_output_index_ = cast_engine_->getBindingIndex("cast_output");
-    if (cast_input_index_ < 0 || cast_output_index_ < 0) {
-        std::cerr << "Invalid RPP postprocess cast binding index." << std::endl;
+    infer1::IIdentityLayer* cast = network->addIdentity(*yolo_output);
+    if (cast == nullptr) {
+        std::cerr << "Failed to create RPP fused postprocess cast." << std::endl;
         return false;
     }
-    return true;
-}
+    cast->setPrecision(infer1::DataType::kBF);
+    cast->setOutputType(0, infer1::DataType::kBF);
+    cast->getOutput(0)->setType(infer1::DataType::kBF);
 
-/**
- * @brief Build the runtime addNMS network used by device-side YOLO candidate suppression.
- */
-bool RppYoloPostprocessor::buildNmsEngine()
-{
-    PERF_SCOPE_CATE("rpp_yolo_postprocess_build_nms_engine", "postprocess");
-    // Build the RPP addNMS runtime graph around sliced boxes and class scores.
-    std::unique_ptr<infer1::IBuilder> builder {infer1::createInferBuilder(rpp_postprocess_logger())};
-    if (builder == nullptr) {
-        std::cerr << "Failed to create RPP NMS builder." << std::endl;
+    infer1::Dims box_start{};
+    box_start.nbDims = 2;
+    box_start.d[0] = 0;
+    box_start.d[1] = 0;
+    infer1::Dims box_size{};
+    box_size.nbDims = 2;
+    box_size.d[0] = config_.output_rows;
+    box_size.d[1] = 4;
+    infer1::Dims stride{};
+    stride.nbDims = 2;
+    stride.d[0] = 1;
+    stride.d[1] = 1;
+    infer1::ISliceLayer* boxes_slice = network->addSlice(*cast->getOutput(0),
+                                                         box_start,
+                                                         box_size,
+                                                         stride);
+    if (boxes_slice == nullptr) {
+        std::cerr << "Failed to create RPP fused boxes slice." << std::endl;
         return false;
     }
-    std::unique_ptr<infer1::INetworkDefinition> network {builder->createNetwork()};
-    if (network == nullptr) {
-        std::cerr << "Failed to create RPP NMS network." << std::endl;
-        return false;
-    }
-    std::unique_ptr<infer1::IBuilderConfig> builder_config {builder->createBuilderConfig()};
-    if (builder_config == nullptr) {
-        std::cerr << "Failed to create RPP NMS builder config." << std::endl;
-        return false;
-    }
+    boxes_slice->setPrecision(infer1::DataType::kBF);
+    boxes_slice->setOutputType(0, infer1::DataType::kBF);
+    boxes_slice->getOutput(0)->setType(infer1::DataType::kBF);
+    boxes_slice->getOutput(0)->setName("fused_output_boxes");
 
-    // NMS consumes [rows, 4] boxes and [rows, scores] class/objectness scores.
-    infer1::Dims boxes_dims{};
-    boxes_dims.nbDims = 2;
-    boxes_dims.d[0] = config_.output_rows;
-    boxes_dims.d[1] = 4;
-
-    infer1::Dims scores_dims{};
-    scores_dims.nbDims = 2;
-    scores_dims.d[0] = config_.output_rows;
-    scores_dims.d[1] = score_channels(config_);
+    infer1::Dims scores_start{};
+    scores_start.nbDims = 2;
+    scores_start.d[0] = 0;
+    scores_start.d[1] = 4;
+    infer1::Dims scores_size{};
+    scores_size.nbDims = 2;
+    scores_size.d[0] = config_.output_rows;
+    scores_size.d[1] = score_channels(config_);
+    infer1::ISliceLayer* scores_slice = network->addSlice(*cast->getOutput(0),
+                                                          scores_start,
+                                                          scores_size,
+                                                          stride);
+    if (scores_slice == nullptr) {
+        std::cerr << "Failed to create RPP fused scores slice." << std::endl;
+        return false;
+    }
+    scores_slice->setPrecision(infer1::DataType::kBF);
+    scores_slice->setOutputType(0, infer1::DataType::kBF);
+    scores_slice->getOutput(0)->setType(infer1::DataType::kBF);
 
     infer1::Dims scalar_dims{};
     scalar_dims.nbDims = 1;
     scalar_dims.d[0] = 1;
-
-    infer1::ITensor* boxes = network->addInput("input_boxes", infer1::DataType::kBF, boxes_dims);
-    infer1::ITensor* scores = network->addInput("input_scores", infer1::DataType::kBF, scores_dims);
     infer1::ITensor* max_output_per_class =
         network->addInput("input_max_out_per_class", infer1::DataType::kINT32, scalar_dims);
-    infer1::ITensor* iou_threshold = network->addInput("input_iou_threshold", infer1::DataType::kBF, scalar_dims);
-    infer1::ITensor* score_threshold = network->addInput("input_score_threshold", infer1::DataType::kBF, scalar_dims);
-    if (boxes == nullptr || scores == nullptr || max_output_per_class == nullptr ||
-        iou_threshold == nullptr || score_threshold == nullptr) {
-        std::cerr << "Failed to create RPP NMS inputs." << std::endl;
+    infer1::ITensor* iou_threshold =
+        network->addInput("input_iou_threshold", infer1::DataType::kBF, scalar_dims);
+    infer1::ITensor* score_threshold =
+        network->addInput("input_score_threshold", infer1::DataType::kBF, scalar_dims);
+    if (max_output_per_class == nullptr || iou_threshold == nullptr || score_threshold == nullptr) {
+        std::cerr << "Failed to create RPP fused NMS scalar inputs." << std::endl;
         return false;
     }
 
-    // addNMS keeps NMS on the RPP runtime path; CPU only parses the compact result.
-    infer1::INMSLayer* nms = network->addNMS(*boxes, *scores, *max_output_per_class);
+    infer1::INMSLayer* nms = network->addNMS(*boxes_slice->getOutput(0),
+                                             *scores_slice->getOutput(0),
+                                             *max_output_per_class);
     if (nms == nullptr) {
-        std::cerr << "Failed to create RPP NMS layer." << std::endl;
+        std::cerr << "Failed to create RPP fused NMS layer." << std::endl;
         return false;
     }
     nms->setBoundingBoxFormat(infer1::BoundingBoxFormat::kCENTER_SIZES);
@@ -378,51 +347,44 @@ bool RppYoloPostprocessor::buildNmsEngine()
     nms->setOutputType(1, infer1::DataType::kINT32);
     nms->setHasBoxConfidence(config_.has_box_confidence);
     nms->setIsAgnostic(config_.agnostic);
-
     nms->getOutput(0)->setName("output_indices");
     nms->getOutput(1)->setName("output_num_out_boxes");
+
+    network->markOutput(*boxes_slice->getOutput(0));
     network->markOutput(*nms->getOutput(0));
     network->markOutput(*nms->getOutput(1));
 
     builder->setMaxBatchSize(1);
-    builder_config->setMaxWorkspaceSize(1024);
+    builder_config->setMaxWorkspaceSize(static_cast<size_t>(16) << 20);
     builder_config->setFlag(infer1::BuilderFlag::kBF16);
-
-    try {
-        nms_engine_.reset(builder->buildEngineWithConfig(*network, *builder_config));
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Failed to build RPP NMS engine: " << e.what() << std::endl;
-        throw;
-    }
-    if (nms_engine_ == nullptr) {
-        std::cerr << "Failed to build RPP NMS engine." << std::endl;
+    fused_engine_.reset(builder->buildEngineWithConfig(*network, *builder_config));
+    if (fused_engine_ == nullptr) {
+        std::cerr << "Failed to build RPP fused postprocess engine." << std::endl;
         return false;
     }
-    nms_context_.reset(nms_engine_->createExecutionContext());
-    if (nms_context_ == nullptr) {
-        std::cerr << "Failed to create RPP NMS context." << std::endl;
+    fused_context_.reset(fused_engine_->createExecutionContext());
+    if (fused_context_ == nullptr) {
+        std::cerr << "Failed to create RPP fused postprocess context." << std::endl;
         return false;
     }
 
-    // Cache binding indices once so the per-frame run path only fills binding arrays.
-    nms_boxes_index_ = nms_engine_->getBindingIndex("input_boxes");
-    nms_scores_index_ = nms_engine_->getBindingIndex("input_scores");
-    nms_max_output_index_ = nms_engine_->getBindingIndex("input_max_out_per_class");
-    nms_iou_threshold_index_ = nms_engine_->getBindingIndex("input_iou_threshold");
-    nms_score_threshold_index_ = nms_engine_->getBindingIndex("input_score_threshold");
-    nms_indices_index_ = nms_engine_->getBindingIndex("output_indices");
-    nms_count_index_ = nms_engine_->getBindingIndex("output_num_out_boxes");
-    if (nms_boxes_index_ < 0 || nms_scores_index_ < 0 || nms_max_output_index_ < 0 ||
+    fused_input_index_ = fused_engine_->getBindingIndex("fused_yolo_output");
+    fused_boxes_output_index_ = fused_engine_->getBindingIndex("fused_output_boxes");
+    nms_max_output_index_ = fused_engine_->getBindingIndex("input_max_out_per_class");
+    nms_iou_threshold_index_ = fused_engine_->getBindingIndex("input_iou_threshold");
+    nms_score_threshold_index_ = fused_engine_->getBindingIndex("input_score_threshold");
+    nms_indices_index_ = fused_engine_->getBindingIndex("output_indices");
+    nms_count_index_ = fused_engine_->getBindingIndex("output_num_out_boxes");
+    if (fused_input_index_ < 0 || fused_boxes_output_index_ < 0 ||
+        nms_max_output_index_ < 0 ||
         nms_iou_threshold_index_ < 0 || nms_score_threshold_index_ < 0 ||
         nms_indices_index_ < 0 || nms_count_index_ < 0) {
-        std::cerr << "Invalid RPP NMS binding index." << std::endl;
+        std::cerr << "Invalid RPP fused postprocess binding index." << std::endl;
         return false;
     }
 
-    // Output tuple size depends on runtime version: class/index or batch/class/index.
-    infer1::Dims indices_dims = nms_engine_->getBindingDimensions(nms_indices_index_);
-    infer1::Dims count_dims = nms_engine_->getBindingDimensions(nms_count_index_);
+    infer1::Dims indices_dims = fused_engine_->getBindingDimensions(nms_indices_index_);
+    infer1::Dims count_dims = fused_engine_->getBindingDimensions(nms_count_index_);
     nms_indices_elements_ = dims_volume(indices_dims);
     nms_count_elements_ = dims_volume(count_dims);
     if (indices_dims.nbDims > 0) {
@@ -432,7 +394,7 @@ bool RppYoloPostprocessor::buildNmsEngine()
         }
     }
     if (nms_indices_elements_ <= 0 || nms_count_elements_ <= 0 || nms_index_tuple_size_ <= 0) {
-        std::cerr << "Invalid RPP NMS output dimensions." << std::endl;
+        std::cerr << "Invalid RPP fused NMS output dimensions." << std::endl;
         return false;
     }
     return true;
@@ -444,20 +406,13 @@ bool RppYoloPostprocessor::buildNmsEngine()
 bool RppYoloPostprocessor::allocateBuffers()
 {
     PERF_SCOPE_CATE("rpp_yolo_postprocess_allocate_buffers", "postprocess");
-    // Allocate persistent device buffers for cast output and sliced NMS inputs.
-    const size_t output_elems = static_cast<size_t>(config_.output_rows) *
-                                static_cast<size_t>(config_.output_dimensions);
+    // Keep the fused engine's BF16 box output in device memory for compact restoration.
     const size_t boxes_elems = static_cast<size_t>(config_.output_rows) * 4U;
-    const size_t scores_elems = static_cast<size_t>(config_.output_rows) *
-                                static_cast<size_t>(score_channels(config_));
-
-    if (!allocate_device(&yolo_bf16_device_, output_elems * sizeof(uint16_t), "rtMalloc yolo bf16") ||
-        !allocate_device(&boxes_bf16_device_, boxes_elems * sizeof(uint16_t), "rtMalloc boxes bf16") ||
-        !allocate_device(&scores_bf16_device_, scores_elems * sizeof(uint16_t), "rtMalloc scores bf16")) {
+    if (!allocate_device(&boxes_bf16_device_, boxes_elems * sizeof(uint16_t), "rtMalloc boxes bf16")) {
         return false;
     }
 
-    if (nms_context_ != nullptr) {
+    if (fused_context_ != nullptr) {
         // Host pinned buffers receive compact NMS indices and BF16 boxes for CPU rendering.
         const size_t nms_indices_bytes = static_cast<size_t>(nms_indices_elements_) * sizeof(int32_t);
         const size_t nms_count_bytes = static_cast<size_t>(nms_count_elements_) * sizeof(int32_t);
@@ -473,7 +428,7 @@ bool RppYoloPostprocessor::allocateBuffers()
         nms_indices_device_ = nms_outputs_device_;
         nms_count_device_ = static_cast<unsigned char*>(nms_outputs_device_) + nms_indices_bytes;
     }
-    if (nms_context_ != nullptr && nms_max_output_index_ >= 0 &&
+    if (fused_context_ != nullptr && nms_max_output_index_ >= 0 &&
         !allocate_device(&max_output_per_class_device_, sizeof(int32_t), "rtMalloc NMS max output per class")) {
         return false;
     }
@@ -487,7 +442,7 @@ bool RppYoloPostprocessor::copyConstantsToDevice()
 {
     PERF_SCOPE_CATE("rpp_yolo_postprocess_copy_constants_to_device", "postprocess");
     // Thresholds and max-output values are runtime inputs to match the reference addNMS flow.
-    if (nms_context_ == nullptr) {
+    if (fused_context_ == nullptr) {
         return true;
     }
     int32_t max_output_per_class = config_.max_output_boxes_per_class;
@@ -541,60 +496,21 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
         owns_stream = true;
     }
 
-    // Cast model output from FP32 to BF16 because the RPP NMS path consumes BF16 buffers.
-    std::vector<void*> cast_bindings(static_cast<size_t>(cast_engine_->getNbBindings()), nullptr);
-    cast_bindings[static_cast<size_t>(cast_input_index_)] = const_cast<void*>(yolo_output_device);
-    cast_bindings[static_cast<size_t>(cast_output_index_)] = yolo_bf16_device_;
+    // Submit cast, slicing, and NMS through one SDK engine. Its box output remains
+    // available for compact host-side restoration after NMS.
+    std::vector<void*> fused_bindings(static_cast<size_t>(fused_engine_->getNbBindings()), nullptr);
+    fused_bindings[static_cast<size_t>(fused_input_index_)] = const_cast<void*>(yolo_output_device);
+    fused_bindings[static_cast<size_t>(fused_boxes_output_index_)] = boxes_bf16_device_;
+    fused_bindings[static_cast<size_t>(nms_max_output_index_)] = max_output_per_class_device_;
+    fused_bindings[static_cast<size_t>(nms_iou_threshold_index_)] = iou_threshold_device_;
+    fused_bindings[static_cast<size_t>(nms_score_threshold_index_)] = score_threshold_device_;
+    fused_bindings[static_cast<size_t>(nms_indices_index_)] = nms_indices_device_;
+    fused_bindings[static_cast<size_t>(nms_count_index_)] = nms_count_device_;
 
     auto stage_start = ProfileClock::now();
-    if (!cast_context_->enqueue(1, cast_bindings.data(), run_stream, nullptr)) {
-        std::cerr << "RPP postprocess cast enqueue failed." << std::endl;
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
-        return false;
-    }
-    if (profile != nullptr) {
-        profile->cast_ms = elapsed_ms(stage_start);
-    }
-
-    // Slice YOLO rows into center-size boxes and score channels directly on device.
-    stage_start = ProfileClock::now();
     try {
-        infer1::rpp_nms_pre_slice_infer(as_rpp_deviceptr(yolo_bf16_device_),
-                                        as_rpp_deviceptr(boxes_bf16_device_),
-                                        as_rpp_deviceptr(scores_bf16_device_),
-                                        config_.output_rows,
-                                        score_channels(config_),
-                                        run_stream);
-    }
-    catch (const std::exception& e) {
-        std::cerr << "RPP nms_pre_slice failed: " << e.what() << std::endl;
-        if (owns_stream) {
-            rtStreamDestroy(run_stream);
-        }
-        return false;
-    }
-    if (profile != nullptr) {
-        profile->nms_slice_ms = elapsed_ms(stage_start);
-    }
-
-    // Bind sliced boxes, scores, thresholds, and compact output buffers for addNMS.
-    std::vector<void*> nms_bindings(static_cast<size_t>(nms_engine_->getNbBindings()), nullptr);
-    nms_bindings[static_cast<size_t>(nms_boxes_index_)] = boxes_bf16_device_;
-    nms_bindings[static_cast<size_t>(nms_scores_index_)] = scores_bf16_device_;
-    if (nms_max_output_index_ >= 0) {
-        nms_bindings[static_cast<size_t>(nms_max_output_index_)] = max_output_per_class_device_;
-    }
-    nms_bindings[static_cast<size_t>(nms_iou_threshold_index_)] = iou_threshold_device_;
-    nms_bindings[static_cast<size_t>(nms_score_threshold_index_)] = score_threshold_device_;
-    nms_bindings[static_cast<size_t>(nms_indices_index_)] = nms_indices_device_;
-    nms_bindings[static_cast<size_t>(nms_count_index_)] = nms_count_device_;
-
-    stage_start = ProfileClock::now();
-    try {
-        if (!nms_context_->enqueue(1, nms_bindings.data(), run_stream, nullptr)) {
-            std::cerr << "RPP NMS enqueue failed." << std::endl;
+        if (!fused_context_->enqueue(1, fused_bindings.data(), run_stream, nullptr)) {
+            std::cerr << "RPP fused postprocess enqueue failed." << std::endl;
             if (owns_stream) {
                 rtStreamDestroy(run_stream);
             }
@@ -602,21 +518,21 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
         }
     }
     catch (const std::exception& e) {
-        std::cerr << "RPP NMS failed: " << e.what() << std::endl;
+        std::cerr << "RPP fused postprocess failed: " << e.what() << std::endl;
         if (owns_stream) {
             rtStreamDestroy(run_stream);
         }
         return false;
     }
-    // Complete all queued device postprocess work before measuring D2H. This keeps the
-    // stdout Output D2H field from absorbing cast, slice, and NMS wait time.
-    if (!check_rt(rtStreamSynchronize(run_stream), "rtStreamSynchronize RPP postprocess device work")) {
+    if (!check_rt(rtStreamSynchronize(run_stream), "rtStreamSynchronize RPP fused postprocess")) {
         if (owns_stream) {
             rtStreamDestroy(run_stream);
         }
         return false;
     }
     if (profile != nullptr) {
+        profile->cast_ms = 0.0;
+        profile->nms_slice_ms = 0.0;
         profile->nms_ms = elapsed_ms(stage_start);
     }
 
@@ -646,7 +562,6 @@ bool RppYoloPostprocessor::run(const void* yolo_output_device,
     }
     double d2h_ms = elapsed_ms(stage_start);
 
-    // Decode selected tuple count and clamp it to the allocated output capacity.
     const int32_t* indices_data = reinterpret_cast<const int32_t*>(nms_outputs_host_);
     const int32_t* count_data = reinterpret_cast<const int32_t*>(
         static_cast<const unsigned char*>(nms_outputs_host_) + nms_indices_bytes);
@@ -769,9 +684,7 @@ void RppYoloPostprocessor::releaseBuffers()
 {
     // Device buffers are owned for the lifetime of one initialized postprocessor.
     void** buffers[] = {
-        &yolo_bf16_device_,
         &boxes_bf16_device_,
-        &scores_bf16_device_,
         &max_output_per_class_device_,
         &iou_threshold_device_,
         &score_threshold_device_,
@@ -806,14 +719,10 @@ void RppYoloPostprocessor::releaseBuffers()
 void RppYoloPostprocessor::resetEngines()
 {
     // Reset contexts before engines and clear cached binding indices.
-    cast_context_.reset();
-    cast_engine_.reset();
-    nms_context_.reset();
-    nms_engine_.reset();
-    cast_input_index_ = -1;
-    cast_output_index_ = -1;
-    nms_boxes_index_ = -1;
-    nms_scores_index_ = -1;
+    fused_context_.reset();
+    fused_engine_.reset();
+    fused_input_index_ = -1;
+    fused_boxes_output_index_ = -1;
     nms_max_output_index_ = -1;
     nms_iou_threshold_index_ = -1;
     nms_score_threshold_index_ = -1;

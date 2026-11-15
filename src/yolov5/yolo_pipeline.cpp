@@ -24,10 +24,12 @@ namespace
  */
 bool update_config_from_model(const RppInferEngine& infer_engine, YoloV5Config& config)
 {
-    // This pipeline currently expects the model binding format used by standard YOLOv5 ONNX exports.
+    // Keep preprocessing aligned with the standard YOLOv5 ONNX external tensor contract.
     if (infer_engine.getInputDataType() != infer1::DataType::kFLOAT ||
         infer_engine.getOutputDataType() != infer1::DataType::kFLOAT) {
-        std::cerr << "The current YOLOv5 path only supports float input/output tensors." << std::endl;
+        std::cerr << "The current release requires FP32 input/output tensor boundaries. "
+                  << "Quantized internals are accepted only when the external bindings remain FP32."
+                  << std::endl;
         return false;
     }
 
@@ -207,7 +209,7 @@ bool YoloV5Pipeline::runI420(const void* yuv_data,
 }
 
 /**
- * @brief Shared input path used by RGB and YUV demos to execute one full pipeline pass.
+ * @brief Shared input path used by RGB and YUV applications to execute one full pipeline pass.
  */
 bool YoloV5Pipeline::runInput(const void* data,
                               size_t bytes,
@@ -268,7 +270,6 @@ bool YoloV5Pipeline::runInput(const void* data,
                                 &preprocess_profile)) {
             return false;
         }
-        preprocessor_->releaseSramBuffers();
     }
     auto preprocess_stop = std::chrono::high_resolution_clock::now();
     local_times.preprocess_ms = preprocess_profile.total_ms > 0.0 ?
@@ -311,7 +312,7 @@ bool YoloV5Pipeline::runInput(const void* data,
     local_times.output_d2h_ms = postprocess_profile.device_to_host_ms;
     local_times.output_d2h_bytes = postprocess_profile.device_to_host_bytes;
 
-    // Match the demo-reported compute path: preprocessing, inference, and postprocessing.
+    // Match the application-reported compute path: preprocessing, inference, and postprocessing.
     double compute_ms = local_times.preprocess_ms +
                         local_times.inference_ms +
                         local_times.postprocess_ms;

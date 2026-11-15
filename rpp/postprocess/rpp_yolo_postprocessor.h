@@ -75,7 +75,7 @@ public:
      * @param letterbox Preprocess metadata used to restore boxes to source coordinates.
      * @param detections Output vector populated with retained detections.
      * @param stream Optional runtime stream.
-     * @param profile Optional timing profile populated for demo logs.
+     * @param profile Optional timing profile populated for application logs.
      */
     bool run(const void* yolo_output_device,
              const LetterboxInfo& letterbox,
@@ -85,13 +85,9 @@ public:
 
 private:
     /**
-     * @brief Build the runtime cast engine that converts model FP32 output to BF16.
+     * @brief Build one runtime engine for FP32-to-BF16 cast, slicing, and NMS.
      */
-    bool buildCastEngine();
-    /**
-     * @brief Build the runtime addNMS engine used for device-side NMS.
-     */
-    bool buildNmsEngine();
+    bool buildFusedPostprocessEngine();
     /**
      * @brief Allocate persistent device and pinned host buffers used by postprocessing.
      */
@@ -123,15 +119,11 @@ private:
     RppYoloPostprocessConfig config_;
     bool initialized_ = false;
 
-    std::unique_ptr<infer1::IEngine> cast_engine_;
-    std::unique_ptr<infer1::IExecutionContext> cast_context_;
-    int cast_input_index_ = -1;
-    int cast_output_index_ = -1;
+    std::unique_ptr<infer1::IEngine> fused_engine_;
+    std::unique_ptr<infer1::IExecutionContext> fused_context_;
+    int fused_input_index_ = -1;
+    int fused_boxes_output_index_ = -1;
 
-    std::unique_ptr<infer1::IEngine> nms_engine_;
-    std::unique_ptr<infer1::IExecutionContext> nms_context_;
-    int nms_boxes_index_ = -1;
-    int nms_scores_index_ = -1;
     int nms_max_output_index_ = -1;
     int nms_iou_threshold_index_ = -1;
     int nms_score_threshold_index_ = -1;
@@ -141,9 +133,7 @@ private:
     int nms_indices_elements_ = 0;
     int nms_count_elements_ = 0;
 
-    void* yolo_bf16_device_ = nullptr;
     void* boxes_bf16_device_ = nullptr;
-    void* scores_bf16_device_ = nullptr;
     void* max_output_per_class_device_ = nullptr;
     void* iou_threshold_device_ = nullptr;
     void* score_threshold_device_ = nullptr;

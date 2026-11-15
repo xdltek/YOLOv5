@@ -4,7 +4,7 @@
 
 Language switch: click [English](#english) or [中文](#chinese) to jump to the corresponding section.
 
-This page links to the main reusable API surfaces in the YOLOv5 RPP demo.
+This page links to the main reusable API surfaces in the RPP-accelerated YOLOv5 application.
 
 ## Modules
 
@@ -18,8 +18,8 @@ Click a module path below to jump to its guide:
 - [Utility module](../../src/utils/README.md): shared utility guide.
 - [Performance trace helper](../../src/perf/README.md): perf trace guide.
 - [Script usage](../../README.md#quick-start): root README quick start.
-- [RGB image demo](../../demos/rgb_image/README.md): RGB demo guide.
-- [I420 YUV frame demo](../../demos/yuv_frame/README.md): YUV demo guide.
+- [RGB image application](../../demos/rgb_image/README.md): RGB workload guide.
+- [I420 YUV frame application](../../demos/yuv_frame/README.md): YUV workload guide.
 
 ## Primary Interfaces
 
@@ -42,7 +42,7 @@ Use the module README files for migration notes, input/output contracts, and API
 
 语言切换：点击 [English](#english) 或 [中文](#chinese) 跳转到对应语言章节。
 
-本页链接 YOLOv5 RPP demo 中主要可复用 API。
+本页链接 RPP 加速 YOLOv5 应用中的主要可复用 API。
 
 ## 模块
 
@@ -56,8 +56,8 @@ Use the module README files for migration notes, input/output contracts, and API
 - [工具模块](../../src/utils/README.md)：公共工具说明。
 - [性能 trace 辅助模块](../../src/perf/README.md)：perf trace 说明。
 - [脚本使用](../../README.md#快速开始)：根 README 快速开始。
-- [RGB 图片 demo](../../demos/rgb_image/README.md)：RGB demo 说明。
-- [I420 YUV 帧 demo](../../demos/yuv_frame/README.md)：YUV demo 说明。
+- [RGB 图片应用](../../demos/rgb_image/README.md)：RGB 工作负载说明。
+- [I420 YUV 帧应用](../../demos/yuv_frame/README.md)：YUV 工作负载说明。
 
 ## 主要接口
 

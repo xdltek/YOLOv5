@@ -26,7 +26,7 @@ This module contains the reusable YOLOv5 application layer.
 
 ## Timing Contract
 
-`YoloV5StageTimes` reports H2D and D2H separately. `end_to_end_ms` is the printed preprocess + inference + postprocess latency used for FPS.
+`YoloV5StageTimes` reports H2D and D2H separately. `end_to_end_ms` is the preprocess + inference + postprocess latency used for `End-to-end FPS`; `inference_ms` is the standalone engine execution latency used for `OpenRT inference FPS`.
 
 ---
 
@@ -58,4 +58,4 @@ This module contains the reusable YOLOv5 application layer.
 
 ## 计时约束
 
-`YoloV5StageTimes` 单独上报 H2D 和 D2H。`end_to_end_ms` 是用于计算 FPS 的前处理 + 推理 + 后处理打印耗时。
+`YoloV5StageTimes` 单独上报 H2D 和 D2H。`end_to_end_ms` 是用于计算 `End-to-end FPS` 的前处理 + 推理 + 后处理耗时；`inference_ms` 是用于计算 `OpenRT inference FPS` 的单独 engine 执行耗时。

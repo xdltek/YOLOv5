@@ -94,7 +94,7 @@ namespace sample
             {
                 std::string log_text = str();
 
-                // Prepend a timestamp so runtime messages can be correlated with demo stages.
+                // Prepend a timestamp so runtime messages can be correlated with application stages.
                 std::time_t timestamp = std::time(nullptr);
                 tm* tm_local = std::localtime(&timestamp);
                 mOutput << "[";
@@ -232,10 +232,10 @@ namespace sample
     };
 
     /**
-     * @brief Shared logger used by RppRT builders, parsers, and demo helper code.
+     * @brief Shared logger used by RppRT builders, parsers, and application helper code.
      *
      * The class keeps direct infer1::ILogger inheritance so OpenRT/RppRT APIs can
-     * use the same logger instance as the demo command-line tools.
+     * use the same logger instance as the application command-line tools.
      */
     class Logger : public infer1::ILogger
     {
@@ -272,7 +272,7 @@ namespace sample
          */
         void log(Severity severity, const char* msg) override
         {
-            // Preserve runtime-origin context so parser/build errors are distinguishable from demo messages.
+            // Preserve runtime-origin context so parser/build errors are distinguishable from application messages.
             LogStreamConsumer(mReportableSeverity, severity) << "[OpenRT] " << std::string(msg) << std::endl;
         }
 
@@ -476,7 +476,7 @@ namespace sample
         }
 
         /**
-         * @brief Create a verbose log stream using the global demo logger.
+         * @brief Create a verbose log stream using the global application logger.
          */
         inline LogStreamConsumer LOG_VERBOSE() {
             return LOG_VERBOSE(gLogger);
@@ -491,7 +491,7 @@ namespace sample
         }
 
         /**
-         * @brief Create an info log stream using the global demo logger.
+         * @brief Create an info log stream using the global application logger.
          */
         inline LogStreamConsumer LOG_INFO() {
             return LOG_INFO(gLogger);
@@ -506,7 +506,7 @@ namespace sample
         }
 
         /**
-         * @brief Create a warning log stream using the global demo logger.
+         * @brief Create a warning log stream using the global application logger.
          */
         inline LogStreamConsumer LOG_WARN() {
             return LOG_WARN(gLogger);
@@ -521,7 +521,7 @@ namespace sample
         }
 
         /**
-         * @brief Create an error log stream using the global demo logger.
+         * @brief Create an error log stream using the global application logger.
          */
         inline LogStreamConsumer LOG_ERROR() {
             return LOG_ERROR(gLogger);
@@ -536,7 +536,7 @@ namespace sample
         }
 
         /**
-         * @brief Create a fatal log stream using the global demo logger.
+         * @brief Create a fatal log stream using the global application logger.
          */
         inline LogStreamConsumer LOG_FATAL() {
             return LOG_FATAL(gLogger);

@@ -94,7 +94,7 @@ public:
      * @param model_input_device Destination model input buffer in device memory.
      * @param letterbox Output metadata needed to restore boxes after inference.
      * @param stream Optional runtime stream.
-     * @param profile Optional timing profile populated for demo logs.
+     * @param profile Optional timing profile populated for application logs.
      */
     bool run(const PreprocessInput& input,
              void* model_input_device,
@@ -146,17 +146,16 @@ private:
     int max_input_height_ = 0;
     int model_width_ = 0;
     int model_height_ = 0;
-
     void* host_input_device_ = nullptr;
     size_t host_input_capacity_ = 0;
     void* host_input_pinned_ = nullptr;
     size_t host_input_pinned_capacity_ = 0;
     void* input_sram_ = nullptr;
     size_t input_sram_capacity_ = 0;
-    void* rgb_chw_sram_ = nullptr;
-    size_t rgb_chw_sram_capacity_ = 0;
     void* model_input_sram_ = nullptr;
     size_t model_input_sram_capacity_ = 0;
+
+    rtStream_t run_stream_ = nullptr;
 };
 
 /**

@@ -1,6 +1,6 @@
 /**
  * @file sampleCommon.h
- * @brief Minimal runtime helper utilities shared by the YOLOv5 RPP demo.
+ * @brief Minimal runtime helper utilities shared by the RPP-accelerated YOLOv5 application.
  */
 
 #ifndef SAMPLES_COMMON_SAMPLECOMMON_H_

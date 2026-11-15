@@ -15,37 +15,49 @@ show_help() {
 Usage: scripts/benchmark.sh [options]
 
 Options:
-  -o, --onnx PATH       ONNX model path. Uses weights/yolov5s.onnx when present.
-  -d, --demo NAME       Workload to run: all, rgb, or yuv. Default: all
+  -m, --model PATH      ONNX model path. Required unless weights/yolov5s.onnx exists.
+  -d, --demo NAME       Workload selector: all, rgb, or yuv. Default: all
   -i, --input PATH      RGB image path or I420 YUV path.
+  -o, --output PATH     Rendered output path.
+  -b, --build-dir DIR   Build directory. Default: build
   -l, --loop COUNT      Measured loop count. Default: 20
-      --yuv-width N     I420 width for yuv demo. Default: 1280
-      --yuv-height N    I420 height for yuv demo. Default: 720
+      --yuv-width N     I420 width for the YUV workload. Default: 1280
+      --yuv-height N    I420 height for the YUV workload. Default: 720
   -h, --help            Show this help message.
 
-Logs are saved to build/logs/benchmark_<demo>_<timestamp>.log.
+Logs are saved to <build-dir>/logs/benchmark_<workload>_<timestamp>.log.
 EOF
 }
 
 model=""
-demo="all"
+workload="all"
 input=""
+output=""
+build_dir="build"
 loop_count="20"
 yuv_width="1280"
 yuv_height="720"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -o|--onnx)
+        -m|--model)
             model="$2"
             shift 2
             ;;
         -d|--demo)
-            demo="$2"
+            workload="$2"
             shift 2
             ;;
         -i|--input)
             input="$2"
+            shift 2
+            ;;
+        -o|--output)
+            output="$2"
+            shift 2
+            ;;
+        -b|--build-dir)
+            build_dir="$2"
             shift 2
             ;;
         -l|--loop)
@@ -77,30 +89,44 @@ if [[ ! "${loop_count}" =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
-if [[ "${demo}" != "all" && "${demo}" != "rgb" && "${demo}" != "yuv" ]]; then
+if [[ "${workload}" != "all" && "${workload}" != "rgb" && "${workload}" != "yuv" ]]; then
     echo "--demo must be all, rgb, or yuv." >&2
     exit 1
 fi
 
-if [[ "${demo}" == "all" && -n "${input}" ]]; then
+if [[ "${workload}" == "all" && ( -n "${input}" || -n "${output}" ) ]]; then
     # RGB and YUV consume different input formats, so one custom input is valid
     # only when the benchmark targets a single workload.
-    echo "--input requires --demo rgb or --demo yuv when benchmarking a single workload." >&2
+    echo "--input and --output require --demo rgb or --demo yuv when benchmarking a single workload." >&2
     exit 1
 fi
 
-# Keep benchmark logs under build/ so generated artifacts remain ignored by Git.
-log_dir="${ROOT_DIR}/build/logs"
+if [[ -z "${model}" && ! -f "${ROOT_DIR}/weights/yolov5s.onnx" ]]; then
+    echo "${RED}[ERROR   ]${RESET} No ONNX model was specified." >&2
+    echo "${CYAN}[DETAIL  ]${RESET} This package does not include a model, and the optional fallback was not found: ${ROOT_DIR}/weights/yolov5s.onnx" >&2
+    echo "${CYAN}[ACTION  ]${RESET} Provide one with: scripts/benchmark.sh --model /path/to/model.onnx" >&2
+    exit 1
+fi
+
+# Keep benchmark logs under the selected build directory so generated artifacts
+# remain grouped with the binaries and outputs used for the measurement.
+if [[ "${build_dir}" == /* ]]; then
+    resolved_build_dir="${build_dir}"
+else
+    resolved_build_dir="${ROOT_DIR}/${build_dir}"
+fi
+log_dir="${resolved_build_dir}/logs"
 mkdir -p "${log_dir}"
 timestamp="$(date +%Y%m%d_%H%M%S)"
-log_path="${log_dir}/benchmark_${demo}_${timestamp}.log"
+log_path="${log_dir}/benchmark_${workload}_${timestamp}.log"
 
 # Benchmark is a thin wrapper around run.sh so path handling and rpp_server
 # protection stay in one place.
-cmd=("${SCRIPT_DIR}/run.sh" --demo "${demo}" --loop "${loop_count}")
-[[ -n "${model}" ]] && cmd+=(--onnx "${model}")
+cmd=("${SCRIPT_DIR}/run.sh" --demo "${workload}" --loop "${loop_count}" --build-dir "${build_dir}")
+[[ -n "${model}" ]] && cmd+=(--model "${model}")
 [[ -n "${input}" ]] && cmd+=(--input "${input}")
-if [[ "${demo}" == "yuv" || "${demo}" == "all" ]]; then
+[[ -n "${output}" ]] && cmd+=(--output "${output}")
+if [[ "${workload}" == "yuv" || "${workload}" == "all" ]]; then
     cmd+=(--yuv-width "${yuv_width}" --yuv-height "${yuv_height}")
 fi
 
@@ -110,7 +136,7 @@ fi
 +------------------------------------------------------------------+
 |             XDL YOLOv5 PERFORMANCE BENCHMARK                     |
 +------------------------------------------------------------------+
-  Test scope               : ${demo^^}
+  Test scope               : ${workload^^}
   Measured frames          : ${loop_count} per workload (+ 1 warmup)
   Performance log          : ${log_path}
 +------------------------------------------------------------------+

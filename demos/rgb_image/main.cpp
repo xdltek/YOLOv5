@@ -1,6 +1,6 @@
 /**
  * @file main.cpp
- * @brief YOLOv5 RGB/BGR image demo.
+ * @brief YOLOv5 RGB/BGR image application.
  */
 #include "argparse/argparse.hpp"
 #include "demo_reporter.h"
@@ -62,15 +62,15 @@ YoloV5StageTimes average_times(const YoloV5StageTimes& total, int count)
 int main(int argc, char** argv)
 {
     // Step 1: declare the command-line contract for this application.
-    argparse::ArgumentParser program("YOLOv5 RGB image application", "0.1", argparse::default_arguments::help);
+    argparse::ArgumentParser program("YOLOv5 RGB image application", "2.0", argparse::default_arguments::help);
 
-    program.add_argument("-o", "--onnx")
-            .default_value(std::string("../../weights/yolov5s.onnx"))
-            .help("path to the YOLOv5 ONNX model file.");
-    program.add_argument("-i", "--image")
+    program.add_argument("-m", "--model")
+            .required()
+            .help("path to the YOLOv5 ONNX model file (required).");
+    program.add_argument("-i", "--input")
             .default_value(std::string("../assets/test_1.png"))
             .help("path of RGB/BGR image file.");
-    program.add_argument("--output")
+    program.add_argument("-o", "--output")
             .default_value(std::string("../output/output_rgb.jpg"))
             .help("path of visualization output image.");
     program.add_argument("-l", "--loop")
@@ -96,8 +96,8 @@ int main(int argc, char** argv)
     }
 
     // Step 3: read parsed options and expand user-friendly paths such as ~/model.onnx.
-    std::string model_path = expand_user_path(program.get<std::string>("--onnx"));
-    std::string image_path = expand_user_path(program.get<std::string>("--image"));
+    std::string model_path = expand_user_path(program.get<std::string>("--model"));
+    std::string image_path = expand_user_path(program.get<std::string>("--input"));
     std::string output_path = expand_user_path(program.get<std::string>("--output"));
     int repeat_count = program.get<int>("--loop");
     if (repeat_count <= 0) {
@@ -112,11 +112,11 @@ int main(int argc, char** argv)
 
     // Step 5: validate all files before model build so failures are immediate and readable.
     if (!std::filesystem::exists(model_path)) {
-        std::cerr << "Cannot found onnx model file, path: " << model_path << std::endl;
+        std::cerr << "ONNX model file not found: " << model_path << std::endl;
         return EXIT_FAILURE;
     }
     if (!std::filesystem::exists(image_path)) {
-        std::cerr << "Cannot found image file, path: " << image_path << std::endl;
+        std::cerr << "Input image file not found: " << image_path << std::endl;
         return EXIT_FAILURE;
     }
 

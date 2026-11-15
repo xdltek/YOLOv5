@@ -4,7 +4,7 @@
 
 Language switch: click [English](#english) or [中文](#chinese) to jump to the corresponding section.
 
-This module contains shared helpers used by the demo, inference wrapper, and RPP modules.
+This module contains shared helpers used by the applications, inference wrapper, and RPP modules.
 
 ## Responsibilities
 
@@ -26,7 +26,7 @@ Keep utilities model-agnostic. Model-specific labels, preprocessing rules, and p
 
 语言切换：点击 [English](#english) 或 [中文](#chinese) 跳转到对应语言章节。
 
-本模块包含 demo、推理封装和 RPP 模块共用的辅助代码。
+本模块包含应用、推理封装和 RPP 模块共用的辅助代码。
 
 ## 模块职责
 

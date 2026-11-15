@@ -4,7 +4,7 @@
 
 Language switch: click [English](#english) or [中文](#chinese) to jump to the corresponding section.
 
-This directory contains the optional `rpp_perf` integration used by the YOLOv5 demos. It wraps trace-window creation, scoped host events, and RPP driver-record forwarding behind a small reusable C++ interface.
+This directory contains the optional `rpp_perf` integration used by the YOLOv5 applications. It wraps trace-window creation, scoped host events, and RPP driver-record forwarding behind a small reusable C++ interface.
 
 The module is inactive by default. It becomes active only when the project is configured with `YOLO_ENABLE_RPP_PERF=ON`.
 
@@ -56,11 +56,11 @@ Targets that emit trace scopes link against `perf_trace`:
 target_link_libraries(my_demo PRIVATE perf_trace)
 ```
 
-If the target already links a library that exposes `perf_trace` as a public dependency, no extra demo-level link is required. In this project, `yolov5_core`, `rpp_yolo_preprocess`, and `rpp_yolo_postprocess` already link the perf wrapper.
+If the target already links a library that exposes `perf_trace` as a public dependency, no extra application-level link is required. In this project, `yolov5_core`, `rpp_yolo_preprocess`, and `rpp_yolo_postprocess` already link the perf wrapper.
 
-## Demo Behavior
+## Application Behavior
 
-The RGB and YUV demos automatically create a perf session in perf-enabled builds:
+The RGB and YUV applications automatically create a perf session in perf-enabled builds:
 
 ```cpp
 PerfTraceSession trace_session("yolov5_rgb_image_demo",
@@ -75,13 +75,13 @@ The trace file is written under:
 build/trace/
 ```
 
-The demo prints the generated trace path when the session starts.
+The application prints the generated trace path when the session starts.
 
 ## Call Flow
 
 ```text
 +-------------------------+
-| Demo main               |
+| Application main        |
 | create PerfTraceSession |
 +-------------------------+
             |
@@ -132,9 +132,9 @@ Internally this calls:
 rppLogsDumpToTraceWindows(g_trace_window, mode);
 ```
 
-The current demos pass mode `0`. This follows the OpenRT sandbox style and forwards driver records into the same trace window as the host `PERF_SCOPE` events.
+The current applications pass mode `0`. This follows the OpenRT sandbox style and forwards driver records into the same trace window as the host `PERF_SCOPE` events.
 
-If the JSON contains only host demo events and no driver records, check:
+If the JSON contains only host application events and no driver records, check:
 
 - The binary was rebuilt after enabling `YOLO_ENABLE_RPP_PERF`.
 - `enableDriverTrace(0)` is called after the session is active.
@@ -143,7 +143,7 @@ If the JSON contains only host demo events and no driver records, check:
 
 ## Module Integration
 
-For a demo or library target:
+For an application or library target:
 
 1. Include the header:
 
@@ -209,7 +209,7 @@ PERF_SCOPE_CATE("rpp_yolo_postprocess_run", "postprocess");
 - The trace session owns process-wide trace state. Create one session per process.
 - `PerfScope` is intentionally cheap when tracing is disabled.
 - Driver trace forwarding is disabled automatically when the session shuts down.
-- Demo timing printed to stdout remains independent from `rpp_perf`; stdout timing is always available, while JSON traces require perf-enabled builds.
+- Application timing printed to stdout remains independent from `rpp_perf`; stdout timing is always available, while JSON traces require perf-enabled builds.
 
 ---
 
@@ -219,7 +219,7 @@ PERF_SCOPE_CATE("rpp_yolo_postprocess_run", "postprocess");
 
 语言切换：点击 [English](#english) 或 [中文](#chinese) 跳转到对应语言章节。
 
-本目录包含 YOLOv5 demo 使用的可选 `rpp_perf` 集成。它用一个较小的可复用 C++ 接口封装 trace window 创建、host 侧范围事件，以及 RPP driver 记录转发。
+本目录包含 YOLOv5 应用使用的可选 `rpp_perf` 集成。它用一个较小的可复用 C++ 接口封装 trace window 创建、host 侧范围事件，以及 RPP driver 记录转发。
 
 默认情况下该模块不启用。只有项目使用 `YOLO_ENABLE_RPP_PERF=ON` 配置构建时，trace 功能才会生效。
 
@@ -271,11 +271,11 @@ endif()
 target_link_libraries(my_demo PRIVATE perf_trace)
 ```
 
-如果当前 target 已经链接了一个公开依赖 `perf_trace` 的库，则 demo 层不需要重复链接。本项目中，`yolov5_core`、`rpp_yolo_preprocess`、`rpp_yolo_postprocess` 已经链接 perf wrapper。
+如果当前 target 已经链接了一个公开依赖 `perf_trace` 的库，则应用层不需要重复链接。本项目中，`yolov5_core`、`rpp_yolo_preprocess`、`rpp_yolo_postprocess` 已经链接 perf wrapper。
 
-## Demo 行为
+## 应用行为
 
-RGB 和 YUV demo 在 perf-enabled 构建中会自动创建 perf session：
+RGB 和 YUV 应用在 perf-enabled 构建中会自动创建 perf session：
 
 ```cpp
 PerfTraceSession trace_session("yolov5_rgb_image_demo",
@@ -290,13 +290,13 @@ trace 文件会写入：
 build/trace/
 ```
 
-session 启动时，demo 会打印生成的 trace 路径。
+session 启动时，应用会打印生成的 trace 路径。
 
 ## 调用流程
 
 ```text
 +-------------------------+
-| Demo main               |
+| Application main        |
 | 创建 PerfTraceSession   |
 +-------------------------+
             |
@@ -347,9 +347,9 @@ trace_session.enableDriverTrace(0);
 rppLogsDumpToTraceWindows(g_trace_window, mode);
 ```
 
-当前 demo 传入 mode `0`。该方式参考 OpenRT sandbox，将 driver 记录转发到和 host `PERF_SCOPE` 事件相同的 trace window 中。
+当前应用传入 mode `0`。该方式参考 OpenRT sandbox，将 driver 记录转发到和 host `PERF_SCOPE` 事件相同的 trace window 中。
 
-如果 JSON 中只有 demo host 事件，没有 driver 记录，可以检查：
+如果 JSON 中只有应用 host 事件，没有 driver 记录，可以检查：
 
 - binary 是否在开启 `YOLO_ENABLE_RPP_PERF` 后重新构建。
 - `enableDriverTrace(0)` 是否在 session active 后调用。
@@ -358,7 +358,7 @@ rppLogsDumpToTraceWindows(g_trace_window, mode);
 
 ## 模块接入
 
-demo 或 library target 中接入时：
+应用或 library target 中接入时：
 
 1. 引入头文件：
 
@@ -424,4 +424,4 @@ PERF_SCOPE_CATE("rpp_yolo_postprocess_run", "postprocess");
 - trace session 拥有进程级 trace 状态。每个进程创建一个 session 即可。
 - tracing 关闭时，`PerfScope` 开销很低。
 - session 关闭时会自动停止 driver trace forwarding。
-- demo stdout 打印的时间和 `rpp_perf` 相互独立；stdout 时间始终可用，JSON trace 需要 perf-enabled 构建。
+- 应用 stdout 打印的时间和 `rpp_perf` 相互独立；stdout 时间始终可用，JSON trace 需要 perf-enabled 构建。

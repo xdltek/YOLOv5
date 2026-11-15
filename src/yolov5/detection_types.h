@@ -46,7 +46,7 @@ struct LetterboxInfo
 };
 
 /**
- * @brief Runtime parameters for a standard YOLOv5s-style detection model.
+ * @brief Runtime parameters for a standard classic YOLOv5 detection model.
  */
 struct YoloV5Config
 {

@@ -42,7 +42,7 @@ namespace sample
 
     /**
      * @brief Update reportable severity on the global logger and cached stream consumers.
-     * @param severity Minimum severity printed by the demo logger.
+     * @param severity Minimum severity printed by the application logger.
      */
     void setReportableSeverity(Logger::Severity severity);
 

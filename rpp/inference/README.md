@@ -4,7 +4,7 @@
 
 Language switch: click [English](#english) or [中文](#chinese) to jump to the corresponding section.
 
-This module wraps OpenRT on RPP inference for YOLOv5-compatible ONNX models.
+This module wraps OpenRT on RPP inference for the validated classic YOLOv5 P5 and P6 detection families at static 640×640 and 1280×1024 input shapes: YOLOv5n/s/m/l/x and YOLOv5n6/s6/m6/l6/x6.
 
 ## Responsibilities
 
@@ -27,7 +27,7 @@ This module wraps OpenRT on RPP inference for YOLOv5-compatible ONNX models.
 
 ## Input And Output
 
-- Input: YOLOv5-compatible ONNX model path.
+- Input: supported static, simplified YOLOv5 ONNX model path.
 - Input binding: FP32 model input tensor.
 - Output binding: FP32 YOLOv5 output tensor.
 
@@ -45,7 +45,7 @@ The cache is stored under `<model-directory>/.engine_cache/`. Its key includes O
 
 语言切换：点击 [English](#english) 或 [中文](#chinese) 跳转到对应语言章节。
 
-本模块封装 YOLOv5 兼容 ONNX 模型在 OpenRT on RPP 上的推理流程。
+本模块封装本版本验证的经典 YOLOv5 P5 与 P6 检测系列在 OpenRT on RPP 上的推理流程，支持静态 640×640 和 1280×1024 输入 shape，包括 YOLOv5n/s/m/l/x 和 YOLOv5n6/s6/m6/l6/x6。
 
 ## 模块职责
 
@@ -68,7 +68,7 @@ The cache is stored under `<model-directory>/.engine_cache/`. Its key includes O
 
 ## 输入输出
 
-- 输入：YOLOv5 兼容 ONNX 模型路径。
+- 输入：受支持的静态维度、已简化 YOLOv5 ONNX 模型路径。
 - 输入 binding：FP32 模型输入 tensor。
 - 输出 binding：FP32 YOLOv5 输出 tensor。
 
