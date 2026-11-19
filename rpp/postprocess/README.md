@@ -23,7 +23,7 @@ This module converts YOLOv5 model output into compact detection records.
 
 Models with a different output layout are outside this release guarantee. Supporting one requires coordinated updates to `YoloV5Config`, postprocess configuration, detection parsing, and product validation.
 
-At 640×640, the validated YOLOv5n/s/m/l/x models produce `[1,25200,85]`. At 1280×1024, they produce `[1,80640,85]`. Both contracts use pixel-space `xywh`, objectness, and 80 COCO class scores.
+At 640×640, the validated P5 models produce `[1,25200,85]` and classic P6 models produce `[1,25500,85]`. At 1280×1024, P5 models produce `[1,80640,85]` and P6 models produce `[1,81600,85]`. All four contracts use pixel-space `xywh`, objectness, and 80 COCO class scores.
 
 ## CPU Boundary
 
@@ -63,7 +63,7 @@ YOLO decode and NMS stay on RPP in the application path. The CPU uses returned N
 
 不同输出布局的模型不属于本次发布保证范围。如需扩展，必须同步更新 `YoloV5Config`、后处理配置、检测结果解析逻辑并重新完成产品验证。
 
-在 640×640 输入下，已验证的 YOLOv5n/s/m/l/x 模型输出 `[1,25200,85]`；在 1280×1024 输入下，输出为 `[1,80640,85]`。两种契约均使用像素坐标 `xywh`、objectness 和 80 个 COCO 类别分数。
+在 640×640 输入下，已验证的 P5 模型输出 `[1,25200,85]`，经典 P6 模型输出 `[1,25500,85]`；在 1280×1024 输入下，P5 模型输出 `[1,80640,85]`，P6 模型输出 `[1,81600,85]`。四种契约均使用像素坐标 `xywh`、objectness 和 80 个 COCO 类别分数。
 
 ## CPU 边界
 

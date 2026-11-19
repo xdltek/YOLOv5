@@ -8,7 +8,7 @@ This application runs one RGB/BGR image through the reusable YOLOv5 RPP pipeline
 
 ## Application Scope
 
-- Load a validated classic YOLOv5n/s/m/l/x ONNX model.
+- Load a validated COCO80 YOLOv5 P5 or classic P6 n/s/m/l/x ONNX model.
 - Read an image with OpenCV.
 - Run one explicit warmup pass.
 - Run measured inference loops and print stage-level latency.
@@ -144,7 +144,7 @@ Use this workload when the integrating application already receives compressed o
 
 ## 应用范围
 
-- 加载本版本验证的经典 YOLOv5n/s/m/l/x ONNX 模型。
+- 加载本版本验证的 COCO80 YOLOv5 P5 或经典 P6 n/s/m/l/x ONNX 模型。
 - 使用 OpenCV 读取图片。
 - 显式执行一次完整 warmup。
 - 执行指定次数的测量 loop，并打印阶段级耗时。

@@ -13,34 +13,28 @@ This release note records only the final differences between the current code an
 | Release version | V2.0 |
 | Baseline tag | `V1.0` |
 | Target code | Current repository code |
-| Supported models | Classic YOLOv5n/s/m/l/x detection models at static 640×640 and 1280×1024 input shapes |
-| INT8 status | Experimental OpenRT parse/engine execution; accuracy is outside this release gate |
+| Supported models | COCO80 YOLOv5 P5 and classic P6 n/s/m/l/x detection models at static 640×640 and 1280×1024 input shapes |
 
-### Release Verification
+### Validated Models
 
-The release candidate was rebuilt from clean generated outputs. On 2026-11-15, all 10 supported YOLOv5n/s/m/l/x artifacts completed both RGB-image and I420-YUV single-pipeline runs with non-empty detections and rendered results. Each performance result below uses one unmeasured warmup frame followed by 50 measured frames. Engine construction time is excluded.
+Twenty static FP32 COCO80 detection profiles were validated on 2026-11-19: P5 YOLOv5n/s/m/l/x and classic P6 YOLOv5n6/s6/m6/l6/x6 at 640×640 and 1280×1024. Every profile passed ONNX checker, RGB application validation with 20 measured frames, and I420 YUV functional validation with non-empty detections and rendered results.
 
-| Validated family | ONNX artifacts | Input | Output | Functional status |
-| :--- | :--- | :--- | :--- | :--- |
-| YOLOv5n/s/m/l/x | `yolov5{n,s,m,l,x}_640x640_sim.onnx` | FP32 `[1,3,640,640]` | FP32 `[1,25200,85]` | RGB 5/5; YUV 5/5 passed |
-| YOLOv5n/s/m/l/x | `yolov5{n,s,m,l,x}_1280x1024_sim.onnx` | FP32 `[1,3,1280,1024]` | FP32 `[1,80640,85]` | RGB 5/5; YUV 5/5 passed |
+Complete P5 and P6 performance tables for both input shapes are published in `README.md`. The table below summarizes the 1280×1024 RGB measurements.
 
-The highlighted throughput results for the two retained applications are:
+| Model profile | End-to-end latency | FPS | Status |
+|---|---:|---:|---|
+| YOLOv5n P5 | 26.244 ms | 38.104 | PASS |
+| YOLOv5s P5 | 31.695 ms | 31.551 | PASS |
+| YOLOv5m P5 | 52.390 ms | 19.088 | PASS |
+| YOLOv5l P5 | 73.469 ms | 13.611 | PASS |
+| YOLOv5x P5 | 128.139 ms | 7.804 | PASS |
+| YOLOv5n6 P6 | 27.240 ms | 36.711 | PASS |
+| YOLOv5s6 P6 | 31.877 ms | 31.371 | PASS |
+| YOLOv5m6 P6 | 52.962 ms | 18.882 | PASS |
+| YOLOv5l6 P6 | 75.428 ms | 13.258 | PASS |
+| YOLOv5x6 P6 | 130.264 ms | 7.677 | PASS |
 
-| Model | Static input | RGB end-to-end | RGB inference | I420 YUV end-to-end | I420 YUV inference |
-| :--- | :---: | ---: | ---: | ---: | ---: |
-| YOLOv5n | 640×640 | 130.695 FPS | 329.811 FPS | 120.511 FPS | 332.195 FPS |
-| YOLOv5n | 1280×1024 | 40.934 FPS | 78.309 FPS | 39.066 FPS | 78.498 FPS |
-| YOLOv5s | 640×640 | 114.561 FPS | 239.005 FPS | 105.363 FPS | 239.005 FPS |
-| YOLOv5s | 1280×1024 | 34.050 FPS | 56.761 FPS | 32.722 FPS | 56.649 FPS |
-| YOLOv5m | 640×640 | 65.384 FPS | 94.031 FPS | 62.303 FPS | 94.257 FPS |
-| YOLOv5m | 1280×1024 | 20.106 FPS | 26.314 FPS | 19.707 FPS | 26.317 FPS |
-| YOLOv5l | 640×640 | 46.253 FPS | 59.791 FPS | 44.642 FPS | 59.570 FPS |
-| YOLOv5l | 1280×1024 | 14.061 FPS | 16.822 FPS | 13.804 FPS | 16.790 FPS |
-| YOLOv5x | 640×640 | 28.415 FPS | 33.092 FPS | 27.828 FPS | 33.050 FPS |
-| YOLOv5x | 1280×1024 | 8.033 FPS | 8.874 FPS | 7.963 FPS | 8.869 FPS |
-
-End-to-end FPS is calculated from the measured preprocess, inference, and postprocess stages. OpenRT inference FPS is derived as `1000 / average OpenRT inference latency`. These figures describe this specific local release run and are not a cross-platform performance guarantee. Customer benchmark logs are generated under `<build-dir>/logs/` by `scripts/benchmark.sh`.
+Each reference result uses one complete-pipeline warmup followed by 20 measured RGB frames. Engine initialization and visualization are excluded. Performance may vary with the accelerator, SDK, driver, firmware, and operating conditions.
 
 ### Added
 
@@ -83,7 +77,7 @@ End-to-end FPS is calculated from the measured preprocess, inference, and postpr
 - Added cache-load error detection. A cache that reports OpenRT deserialization errors is rejected and rebuilt from ONNX instead of being used for inference.
 - Updated `scripts/run.sh` so the default mode runs both RGB and YUV workloads serially. Single-workload execution remains available through `--demo rgb` or `--demo yuv`.
 - Updated `scripts/benchmark.sh` so the default benchmark covers both workloads and saves logs under `build/logs/`.
-- Validated the unquantized classic COCO80 YOLOv5n/s/m/l/x detection models at static 640×640 and 1280×1024 input shapes. Other model families and output contracts are outside the V2.0 release guarantee.
+- Validated 20 COCO80 model profiles: P5 YOLOv5n/s/m/l/x and classic P6 YOLOv5n6/s6/m6/l6/x6 at static 640×640 and 1280×1024 input shapes. Other model families and output contracts are outside the V2.0 release scope.
 - Updated documentation style so README files are bilingual and module/document links use explicit clickable path descriptions.
 - Moved logo assets from `doc/logo/` to `docs/logo/`.
 
@@ -111,34 +105,28 @@ End-to-end FPS is calculated from the measured preprocess, inference, and postpr
 | 发布版本 | V2.0 |
 | 基准 tag | `V1.0` |
 | 目标代码 | 当前仓库代码 |
-| 支持模型 | 经典 YOLOv5n/s/m/l/x 检测模型，支持静态 640×640 与 1280×1024 输入 shape |
-| INT8 状态 | 实验性 OpenRT 解析和 engine 执行能力；精度不作为本次发布门槛 |
+| 支持模型 | COCO80 YOLOv5 P5 和经典 P6 n/s/m/l/x 检测模型，支持静态 640×640 与 1280×1024 输入 shape |
 
-### 发布验证
+### 已验证模型
 
-发布候选版本已从干净的生成目录重新构建。2026-11-15，全部 10 个受支持的 YOLOv5n/s/m/l/x 模型文件均完成 RGB 图片和 I420 YUV 两条单路流水线验证，获得非空检测结果并成功输出检测图。下表每项性能数据均包含 1 帧不计时 warmup 和 50 帧正式测量，不包含 engine 构建时间。
+2026-11-19，共 20 个静态 FP32 COCO80 检测规格通过验证：640×640 和 1280×1024 下的 P5 YOLOv5n/s/m/l/x，以及经典 P6 YOLOv5n6/s6/m6/l6/x6。全部规格均通过 ONNX checker、20 帧 RGB 应用正式测量和 I420 YUV 功能验证，均获得非空检测结果并成功输出检测图。
 
-| 已验证系列 | ONNX 文件 | 输入 | 输出 | 功能状态 |
-| :--- | :--- | :--- | :--- | :--- |
-| YOLOv5n/s/m/l/x | `yolov5{n,s,m,l,x}_640x640_sim.onnx` | FP32 `[1,3,640,640]` | FP32 `[1,25200,85]` | RGB 5/5；YUV 5/5 通过 |
-| YOLOv5n/s/m/l/x | `yolov5{n,s,m,l,x}_1280x1024_sim.onnx` | FP32 `[1,3,1280,1024]` | FP32 `[1,80640,85]` | RGB 5/5；YUV 5/5 通过 |
+完整的两种输入尺寸 P5/P6 性能表见 `README.md`。下表汇总 1280×1024 RGB 测量结果。
 
-以下为两个保留应用的重点吞吐率结果：
+| 模型规格 | 端到端耗时 | FPS | 状态 |
+|---|---:|---:|---|
+| YOLOv5n P5 | 26.244 ms | 38.104 | PASS |
+| YOLOv5s P5 | 31.695 ms | 31.551 | PASS |
+| YOLOv5m P5 | 52.390 ms | 19.088 | PASS |
+| YOLOv5l P5 | 73.469 ms | 13.611 | PASS |
+| YOLOv5x P5 | 128.139 ms | 7.804 | PASS |
+| YOLOv5n6 P6 | 27.240 ms | 36.711 | PASS |
+| YOLOv5s6 P6 | 31.877 ms | 31.371 | PASS |
+| YOLOv5m6 P6 | 52.962 ms | 18.882 | PASS |
+| YOLOv5l6 P6 | 75.428 ms | 13.258 | PASS |
+| YOLOv5x6 P6 | 130.264 ms | 7.677 | PASS |
 
-| 模型 | 静态输入 | RGB 端到端 | RGB 单推理 | I420 YUV 端到端 | I420 YUV 单推理 |
-| :--- | :---: | ---: | ---: | ---: | ---: |
-| YOLOv5n | 640×640 | 130.695 FPS | 329.811 FPS | 120.511 FPS | 332.195 FPS |
-| YOLOv5n | 1280×1024 | 40.934 FPS | 78.309 FPS | 39.066 FPS | 78.498 FPS |
-| YOLOv5s | 640×640 | 114.561 FPS | 239.005 FPS | 105.363 FPS | 239.005 FPS |
-| YOLOv5s | 1280×1024 | 34.050 FPS | 56.761 FPS | 32.722 FPS | 56.649 FPS |
-| YOLOv5m | 640×640 | 65.384 FPS | 94.031 FPS | 62.303 FPS | 94.257 FPS |
-| YOLOv5m | 1280×1024 | 20.106 FPS | 26.314 FPS | 19.707 FPS | 26.317 FPS |
-| YOLOv5l | 640×640 | 46.253 FPS | 59.791 FPS | 44.642 FPS | 59.570 FPS |
-| YOLOv5l | 1280×1024 | 14.061 FPS | 16.822 FPS | 13.804 FPS | 16.790 FPS |
-| YOLOv5x | 640×640 | 28.415 FPS | 33.092 FPS | 27.828 FPS | 33.050 FPS |
-| YOLOv5x | 1280×1024 | 8.033 FPS | 8.874 FPS | 7.963 FPS | 8.869 FPS |
-
-端到端 FPS 根据实测前处理、推理和后处理耗时计算；OpenRT 单推理 FPS 按 `1000 / OpenRT 平均推理延迟` 换算。以上结果仅代表本地本次发布测量，不构成跨平台性能保证。客户运行 `scripts/benchmark.sh` 后，日志保存在 `<构建目录>/logs/`。
+每项参考结果均为完整 pipeline warmup 1 次后正式测量 20 帧，不包含 engine 初始化和可视化。实际性能可能随加速卡、SDK、驱动、固件和运行条件变化。
 
 ### 新增
 
@@ -181,7 +169,7 @@ End-to-end FPS is calculated from the measured preprocess, inference, and postpr
 - 新增缓存加载错误检测。若缓存反序列化时报告 OpenRT 错误，程序会拒绝该缓存并从 ONNX 重建，不会继续用于推理。
 - `scripts/run.sh` 默认串行运行 RGB 和 YUV 两个工作负载；仍可通过 `--demo rgb` 或 `--demo yuv` 运行单个工作负载。
 - `scripts/benchmark.sh` 默认覆盖两个工作负载，并将日志保存到 `build/logs/`。
-- 本次发布已验证未量化的经典 COCO80 YOLOv5n/s/m/l/x 检测模型，覆盖静态 640×640 和 1280×1024 输入 shape。其他模型系列和输出契约不属于 V2.0 发布保证范围。
+- 本次发布已验证 20 个 COCO80 模型规格：静态 640×640 和 1280×1024 下的 P5 YOLOv5n/s/m/l/x，以及经典 P6 YOLOv5n6/s6/m6/l6/x6。其他模型系列和输出契约不属于 V2.0 发布范围。
 - 文档更新为双语 README，并统一模块和文档跳转链接的可点击路径描述。
 - logo 资源从 `doc/logo/` 移动到 `docs/logo/`。
 

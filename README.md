@@ -26,15 +26,16 @@ Click a section link below to jump within this README:
 - [Application Integration](#application-integration)
 - [Known Limitations](#known-limitations)
 - [Troubleshooting](#troubleshooting)
-- [Appendix: Supported Models And ONNX Export](#appendix-supported-models-and-onnx-export)
+- [Validated Models](#validated-models)
+- [Appendix: Export ONNX From a PT Model](#appendix-export-onnx-from-a-pt-model)
 
 ## Quick Start
 
-Run the following commands from the repository root. Replace the example model path if your ONNX file has a different name.
+Run from the repository root. Building does not require an ONNX model. This repository does not include or download model files; provide a supported model when running inference.
 
 ```shell
 scripts/build.sh
-scripts/run.sh -m weights/yolov5s.onnx
+scripts/run.sh --model /path/to/yolov5_model.onnx
 ```
 
 Successful execution reports warmup-stabilized latency and FPS for the RGB and YUV workloads and saves annotated result images under `build/output`.
@@ -50,9 +51,9 @@ The standard scripts are:
 Run a single input format or start a benchmark as follows:
 
 ```shell
-scripts/run.sh -m weights/yolov5s.onnx --demo rgb
-scripts/run.sh -m weights/yolov5s.onnx --demo yuv
-scripts/benchmark.sh -m weights/yolov5s.onnx --demo rgb --loop 20
+scripts/run.sh --model /path/to/yolov5_model.onnx --demo rgb
+scripts/run.sh --model /path/to/yolov5_model.onnx --demo yuv
+scripts/benchmark.sh --model /path/to/yolov5_model.onnx --demo rgb --loop 20
 ```
 
 `scripts/run.sh` resolves paths from the package root and runs the `rgb` and `yuv` workloads serially unless one is selected explicitly. This repository does not include an ONNX model, so pass the model path with `-m/--model`. If that option is omitted, the script checks the optional local fallback `weights/yolov5s.onnx`; when the file is absent, it prints the required action and exits without starting inference. Reference inputs are read from `build/assets`, and annotated images are written to `build/output`. If `/usr/local/rpp/bin/rpp_server` is installed, the script ensures that the service is available before inference and writes its log to `build/logs/rpp_server.log`.
@@ -163,8 +164,8 @@ Run the application from the package root after building. The release package do
 | `-h, --help` | Display command help | — |
 
 ```shell
-scripts/run.sh -m weights/yolov5s.onnx
-scripts/run.sh -m weights/yolov5s.onnx --demo rgb \
+scripts/run.sh --model /path/to/yolov5_model.onnx
+scripts/run.sh --model /path/to/yolov5_model.onnx --demo rgb \
   -i /path/to/input.jpg \
   -o build/output/result.jpg
 ```
@@ -174,8 +175,8 @@ By default, `scripts/run.sh` runs the RGB and YUV workloads serially. Use `--dem
 Benchmark runs use the same model-path and input handling:
 
 ```shell
-scripts/benchmark.sh -m weights/yolov5s.onnx --demo rgb --loop 20
-scripts/benchmark.sh -m weights/yolov5s.onnx --demo yuv --loop 20
+scripts/benchmark.sh --model /path/to/yolov5_model.onnx --demo rgb --loop 20
+scripts/benchmark.sh --model /path/to/yolov5_model.onnx --demo yuv --loop 20
 ```
 
 `scripts/benchmark.sh` accepts the same model, workload, input, output, build-directory, and YUV-size options as `scripts/run.sh`. Its measured-loop default is `20`; `run.sh` defaults to `1` for a quick functional run.
@@ -192,13 +193,13 @@ The scripts and C++ executables use the same path options: `-m/--model` for the 
 
 ```shell
 build/bin/yolov5_rgb_image_demo \
-  -m weights/yolov5s.onnx \
+  -m /path/to/yolov5_model.onnx \
   -i build/assets/test_1.png \
   -o build/output/output_rgb.jpg \
   -l 1
 
 build/bin/yolov5_yuv_frame_demo \
-  -m weights/yolov5s.onnx \
+  -m /path/to/yolov5_model.onnx \
   -i build/assets/test_0.yuv \
   --yuv-width 1280 \
   --yuv-height 720 \
@@ -293,8 +294,7 @@ The following components provide the primary C++ integration interfaces:
 
 ## Known Limitations
 
-- This release supports the static, simplified COCO80 YOLOv5n/s/m/l/x contracts listed in the appendix. Dynamic shapes, other model families, custom-class outputs, and nonstandard coordinate layouts require separate adaptation and validation.
-- INT8 model parsing and engine execution remain experimental; INT8 accuracy is not a V2.0 release criterion.
+- This release supports only the static, simplified COCO80 P5 and P6 contracts listed under [Validated Models](#validated-models). Dynamic shapes, other model families, custom-class outputs, and nonstandard coordinate layouts require separate adaptation and validation.
 - The application uses independent preprocessing, OpenRT inference, and postprocessing stages. Graph mode is not used.
 
 ## Troubleshooting
@@ -304,31 +304,68 @@ The following components provide the primary C++ integration interfaces:
 - If OpenRT reports an error while restoring an engine cache, the application rejects that cache and prints `Cached engine could not be restored safely; rebuilding from ONNX`. No manual action is required. Depending on the installed SDK and model, this safe fallback can add engine-build time at startup but does not affect measured frame performance.
 - If engine construction or inference does not reach `[SUCCESS]`, remove only that model's matching file under `<model-directory>/.engine_cache/` and rerun. Do not remove the ONNX model.
 
-## Appendix: Supported Models And ONNX Export
+## Validated Models
 
-### Validated model family
+The application was validated with four static FP32 COCO80 detection contracts. Model files were local validation inputs only and are not repository or release artifacts.
 
-This release supports the classic COCO80 YOLOv5n/s/m/l/x detection family at two static input shapes. All 10 listed artifacts were validated end to end with FP32 input/output bindings in both retained applications. Each model completed one warmup frame and 50 measured RGB-image frames, followed by one warmup frame and 50 measured I420-YUV frames, with non-empty detection results and rendered output images.
+| Model family | Input | Output | Classes | Opset | Status |
+|---|---|---|---:|---:|---|
+| YOLOv5n/s/m/l/x P5 | `[1,3,640,640]` | `[1,25200,85]` | 80 | 12 | PASS |
+| YOLOv5n6/s6/m6/l6/x6 P6 | `[1,3,640,640]` | `[1,25500,85]` | 80 | 12 | PASS |
+| YOLOv5n/s/m/l/x P5 | `[1,3,1280,1024]` | `[1,80640,85]` | 80 | 19 | PASS |
+| YOLOv5n6/s6/m6/l6/x6 P6 | `[1,3,1280,1024]` | `[1,81600,85]` | 80 | 19 | PASS |
 
-| Model family | 640×640 artifact | 1280×1024 artifact | Status |
-| :--- | :--- | :--- | :--- |
-| YOLOv5n | `yolov5n_640x640_sim.onnx` | `yolov5n_1280x1024_sim.onnx` | Verified |
-| YOLOv5s | `yolov5s_640x640_sim.onnx` | `yolov5s_1280x1024_sim.onnx` | Verified |
-| YOLOv5m | `yolov5m_640x640_sim.onnx` | `yolov5m_1280x1024_sim.onnx` | Verified |
-| YOLOv5l | `yolov5l_640x640_sim.onnx` | `yolov5l_1280x1024_sim.onnx` | Verified |
-| YOLOv5x | `yolov5x_640x640_sim.onnx` | `yolov5x_1280x1024_sim.onnx` | Verified |
-| Input contract | Decoded output | Validated opset |
-| :--- | :--- | :--- |
-| FP32 NCHW `[1,3,640,640]` | FP32 `[1,25200,85]` | 12 |
-| FP32 NCHW `[1,3,1280,1024]` | FP32 `[1,80640,85]` | 19 |
+P5 identifies the standard `yolov5n`, `yolov5s`, `yolov5m`, `yolov5l`, and `yolov5x` models. Classic P6 identifies the corresponding models with a `6` suffix: `yolov5n6`, `yolov5s6`, `yolov5m6`, `yolov5l6`, and `yolov5x6`.
 
-The validated files are stored locally under `weights/yolov5/onnx_sim/`. They use pixel-space `xywh` and the standard COCO 80-class ordering. In the 1280×1024 filenames and export command, the dimensions follow the model tensor's height×width order. The release notes report 50-frame measurements for all 10 listed artifacts in both retained applications; the results describe this local release run and are not cross-platform performance guarantees.
+Validation covered ONNX checker, OpenRT/RPP engine initialization, one complete-pipeline warmup, 20 measured RGB frames, fused RPP postprocessing, non-empty detections, and rendered result images. All 20 profiles also passed the I420 YUV application with one warmup and one measured frame.
 
-YOLOv5u, YOLOv8, custom-class outputs, normalized-coordinate outputs, and model families not listed above are outside this release scope.
+### P5 640×640 performance
 
-Q/DQ INT8 ONNX parsing and engine execution are retained as an experimental capability when OpenRT accepts the graph and its external bindings remain FP32. INT8 numerical accuracy and end-to-end detection results are not release acceptance criteria for this version.
+| Model profile | Preprocess | Inference | Postprocess | End-to-end | FPS | Status |
+|---|---:|---:|---:|---:|---:|---|
+| YOLOv5n 640×640 | 1.546 ms | 3.156 ms | 3.505 ms | 8.207 ms | 121.850 | PASS |
+| YOLOv5s 640×640 | 1.583 ms | 4.393 ms | 3.562 ms | 9.538 ms | 104.840 | PASS |
+| YOLOv5m 640×640 | 1.877 ms | 11.278 ms | 4.595 ms | 17.751 ms | 56.336 | PASS |
+| YOLOv5l 640×640 | 1.816 ms | 17.599 ms | 4.978 ms | 24.393 ms | 40.996 | PASS |
+| YOLOv5x 640×640 | 1.847 ms | 31.235 ms | 4.725 ms | 37.808 ms | 26.449 | PASS |
 
-### ONNX export requirements
+### P6 640×640 performance
+
+| Model profile | Preprocess | Inference | Postprocess | End-to-end | FPS | Status |
+|---|---:|---:|---:|---:|---:|---|
+| YOLOv5n6 640×640 | 1.547 ms | 3.271 ms | 3.471 ms | 8.289 ms | 120.635 | PASS |
+| YOLOv5s6 640×640 | 1.581 ms | 4.555 ms | 3.566 ms | 9.701 ms | 103.077 | PASS |
+| YOLOv5m6 640×640 | 1.771 ms | 11.361 ms | 4.165 ms | 17.298 ms | 57.812 | PASS |
+| YOLOv5l6 640×640 | 1.806 ms | 18.446 ms | 4.852 ms | 25.104 ms | 39.834 | PASS |
+| YOLOv5x6 640×640 | 1.902 ms | 33.006 ms | 4.900 ms | 39.808 ms | 25.121 | PASS |
+
+### P5 1280×1024 performance
+
+| Model profile | Preprocess | Inference | Postprocess | End-to-end | FPS | Status |
+|---|---:|---:|---:|---:|---:|---|
+| YOLOv5n 1280×1024 | 2.861 ms | 13.401 ms | 9.982 ms | 26.244 ms | 38.104 | PASS |
+| YOLOv5s 1280×1024 | 2.936 ms | 18.476 ms | 10.283 ms | 31.695 ms | 31.551 | PASS |
+| YOLOv5m 1280×1024 | 3.115 ms | 38.957 ms | 10.318 ms | 52.390 ms | 19.088 | PASS |
+| YOLOv5l 1280×1024 | 2.821 ms | 60.542 ms | 10.106 ms | 73.469 ms | 13.611 | PASS |
+| YOLOv5x 1280×1024 | 2.805 ms | 115.032 ms | 10.302 ms | 128.139 ms | 7.804 | PASS |
+
+### P6 1280×1024 performance
+
+| Model profile | Preprocess | Inference | Postprocess | End-to-end | FPS | Status |
+|---|---:|---:|---:|---:|---:|---|
+| YOLOv5n6 1280×1024 | 3.096 ms | 13.737 ms | 10.406 ms | 27.240 ms | 36.711 | PASS |
+| YOLOv5s6 1280×1024 | 3.145 ms | 18.483 ms | 10.249 ms | 31.877 ms | 31.371 | PASS |
+| YOLOv5m6 1280×1024 | 2.993 ms | 39.542 ms | 10.427 ms | 52.962 ms | 18.882 | PASS |
+| YOLOv5l6 1280×1024 | 3.021 ms | 61.985 ms | 10.422 ms | 75.428 ms | 13.258 | PASS |
+| YOLOv5x6 1280×1024 | 2.977 ms | 116.766 ms | 10.521 ms | 130.264 ms | 7.677 | PASS |
+
+Each result is the average of 20 measured complete-pipeline frames after one warmup. End-to-end latency is `preprocess + inference + postprocess`; it excludes engine initialization and visualization. These measurements are reference results from the validated RPP environment and are not cross-platform performance guarantees.
+
+> **Note:** Revalidate performance on the target accelerator and software stack before capacity planning or deployment sizing.
+
+## Appendix: Export ONNX From a PT Model
+
+### Export requirements
 
 This product supports ONNX models with static input dimensions only. Simplify the exported model with `onnxsim`, and do not use the YOLOv5 `--dynamic` export option.
 
@@ -348,7 +385,7 @@ python export.py \
 python -m onnxsim yolov5s.onnx yolov5s_sim.onnx
 ```
 
-For the validated high-resolution contract, use `--imgsz 1280 1024 --opset 19`; the dimensions are height followed by width. Replace `yolov5s.pt` with `yolov5n.pt`, `yolov5m.pt`, `yolov5l.pt`, or `yolov5x.pt` as required. Update both filenames in the `onnxsim` command, then pass the generated `*_sim.onnx` file with `-m/--model`. As an optional convenience, a YOLOv5s artifact placed at `weights/yolov5s.onnx` is used when the model option is omitted.
+For the validated high-resolution contract, use `--imgsz 1280 1024 --opset 19`; the dimensions are height followed by width. Replace `yolov5s.pt` with a validated P5 weight (`yolov5n.pt`, `yolov5m.pt`, `yolov5l.pt`, or `yolov5x.pt`) or classic P6 weight (`yolov5n6.pt`, `yolov5s6.pt`, `yolov5m6.pt`, `yolov5l6.pt`, or `yolov5x6.pt`) as required. Update both filenames in the `onnxsim` command, then pass the generated `*_sim.onnx` file with `-m/--model`. YOLOv5u and P6-u models are not part of the validated contracts above. As an optional convenience, a YOLOv5s model placed at `weights/yolov5s.onnx` is used when the model option is omitted.
 
 ---
 
@@ -380,15 +417,16 @@ For the validated high-resolution contract, use `--imgsz 1280 1024 --opset 19`; 
 - [应用集成](#应用集成)
 - [已知限制](#已知限制)
 - [故障排查](#故障排查)
-- [附录：支持的模型与 ONNX 导出](#附录支持的模型与-onnx-导出)
+- [已验证模型](#已验证模型)
+- [附录：从 PT 模型导出 ONNX](#附录从-pt-模型导出-onnx)
 
 ## 快速开始
 
-在仓库根目录执行以下命令。如果您的 ONNX 文件名不同，请替换示例模型路径。
+从仓库根目录执行。编译不需要 ONNX 模型。本仓库不包含也不会下载模型文件；运行推理时需提供受支持的模型。
 
 ```shell
 scripts/build.sh
-scripts/run.sh -m weights/yolov5s.onnx
+scripts/run.sh --model /path/to/yolov5_model.onnx
 ```
 
 执行成功后，应用会报告 RGB 和 YUV 工作负载在 warmup 后的延迟与 FPS，并在 `build/output` 下保存带检测结果的图片。
@@ -404,9 +442,9 @@ scripts/run.sh -m weights/yolov5s.onnx
 运行单一输入格式或启动性能测试：
 
 ```shell
-scripts/run.sh -m weights/yolov5s.onnx --demo rgb
-scripts/run.sh -m weights/yolov5s.onnx --demo yuv
-scripts/benchmark.sh -m weights/yolov5s.onnx --demo rgb --loop 20
+scripts/run.sh --model /path/to/yolov5_model.onnx --demo rgb
+scripts/run.sh --model /path/to/yolov5_model.onnx --demo yuv
+scripts/benchmark.sh --model /path/to/yolov5_model.onnx --demo rgb --loop 20
 ```
 
 `scripts/run.sh` 会从应用根目录解析路径；未显式选择工作负载时，会串行运行 `rgb` 和 `yuv`。本仓库不包含 ONNX 模型，因此运行时应通过 `-m/--model` 指定模型路径。如果省略该参数，脚本会检查可选的本地回退路径 `weights/yolov5s.onnx`；文件不存在时，会输出操作提示并在启动推理前退出。参考输入从 `build/assets` 读取，标注结果写入 `build/output`。如果系统安装了 `/usr/local/rpp/bin/rpp_server`，脚本会在推理前确保服务可用，并将日志写入 `build/logs/rpp_server.log`。
@@ -517,8 +555,8 @@ build/trace/    可选的 rpp_perf trace 文件
 | `-h, --help` | 显示命令帮助 | — |
 
 ```shell
-scripts/run.sh -m weights/yolov5s.onnx
-scripts/run.sh -m weights/yolov5s.onnx --demo rgb \
+scripts/run.sh --model /path/to/yolov5_model.onnx
+scripts/run.sh --model /path/to/yolov5_model.onnx --demo rgb \
   -i /path/to/input.jpg \
   -o build/output/result.jpg
 ```
@@ -528,8 +566,8 @@ scripts/run.sh -m weights/yolov5s.onnx --demo rgb \
 Benchmark 使用相同的模型路径和输入处理方式：
 
 ```shell
-scripts/benchmark.sh -m weights/yolov5s.onnx --demo rgb --loop 20
-scripts/benchmark.sh -m weights/yolov5s.onnx --demo yuv --loop 20
+scripts/benchmark.sh --model /path/to/yolov5_model.onnx --demo rgb --loop 20
+scripts/benchmark.sh --model /path/to/yolov5_model.onnx --demo yuv --loop 20
 ```
 
 `scripts/benchmark.sh` 与 `scripts/run.sh` 支持相同的模型、工作负载、输入、输出、构建目录和 YUV 尺寸参数。性能测试脚本的测量 loop 默认值为 `20`，快速功能运行脚本的默认值为 `1`。
@@ -546,13 +584,13 @@ scripts/benchmark.sh -m weights/yolov5s.onnx --demo yuv --loop 20
 
 ```shell
 build/bin/yolov5_rgb_image_demo \
-  -m weights/yolov5s.onnx \
+  -m /path/to/yolov5_model.onnx \
   -i build/assets/test_1.png \
   -o build/output/output_rgb.jpg \
   -l 1
 
 build/bin/yolov5_yuv_frame_demo \
-  -m weights/yolov5s.onnx \
+  -m /path/to/yolov5_model.onnx \
   -i build/assets/test_0.yuv \
   --yuv-width 1280 \
   --yuv-height 720 \
@@ -644,8 +682,7 @@ build/bin/yolov5_yuv_frame_demo \
 
 ## 已知限制
 
-- 本版本支持附录中列出的静态维度、已简化 COCO80 YOLOv5n/s/m/l/x 模型契约。动态维度、其他模型系列、自定义类别输出和非标准坐标布局需要单独适配并重新验证。
-- INT8 模型解析和 engine 执行仍为实验性能力；INT8 精度不属于 V2.0 发布验收项。
+- 本版本仅支持[已验证模型](#已验证模型)中列出的静态维度、已简化 COCO80 P5/P6 模型契约。动态维度、其他模型系列、自定义类别输出和非标准坐标布局需要单独适配并重新验证。
 - 应用采用独立的前处理、OpenRT 推理和后处理阶段，不使用 Graph 模式。
 
 ## 故障排查
@@ -655,31 +692,68 @@ build/bin/yolov5_yuv_frame_demo \
 - 如果 OpenRT 在恢复 engine 缓存时报告错误，应用会拒绝该缓存，并打印 `Cached engine could not be restored safely; rebuilding from ONNX`。用户无需手动处理。根据本机 SDK 和模型情况，这一安全回退可能增加启动时的 engine 构建时间，但不影响正式测量帧的性能。
 - 如果 engine 构建或推理未到达 `[SUCCESS]`，仅删除 `<模型目录>/.engine_cache/` 下与该模型对应的缓存文件后重新运行；请勿删除 ONNX 模型。
 
-## 附录：支持的模型与 ONNX 导出
+## 已验证模型
 
-### 已验证模型系列
+应用已验证四组静态 FP32 COCO80 检测契约。模型文件仅作为本地验证输入，不属于仓库或发布物。
 
-本版本支持经典 COCO80 YOLOv5n/s/m/l/x 检测模型，并覆盖两种静态输入 shape。下表所列的 10 个模型文件均使用 FP32 输入/输出 binding，在两个保留应用中完成端到端验证。每个模型分别完成 1 帧 warmup 和 50 帧 RGB 图片正式测量，以及 1 帧 warmup 和 50 帧 I420 YUV 正式测量，均获得非空检测结果并成功输出检测图。
+| 模型系列 | 输入 | 输出 | 类别数 | Opset | 状态 |
+|---|---|---|---:|---:|---|
+| YOLOv5n/s/m/l/x P5 | `[1,3,640,640]` | `[1,25200,85]` | 80 | 12 | PASS |
+| YOLOv5n6/s6/m6/l6/x6 P6 | `[1,3,640,640]` | `[1,25500,85]` | 80 | 12 | PASS |
+| YOLOv5n/s/m/l/x P5 | `[1,3,1280,1024]` | `[1,80640,85]` | 80 | 19 | PASS |
+| YOLOv5n6/s6/m6/l6/x6 P6 | `[1,3,1280,1024]` | `[1,81600,85]` | 80 | 19 | PASS |
 
-| 模型系列 | 640×640 文件 | 1280×1024 文件 | 状态 |
-| :--- | :--- | :--- | :--- |
-| YOLOv5n | `yolov5n_640x640_sim.onnx` | `yolov5n_1280x1024_sim.onnx` | 已验证 |
-| YOLOv5s | `yolov5s_640x640_sim.onnx` | `yolov5s_1280x1024_sim.onnx` | 已验证 |
-| YOLOv5m | `yolov5m_640x640_sim.onnx` | `yolov5m_1280x1024_sim.onnx` | 已验证 |
-| YOLOv5l | `yolov5l_640x640_sim.onnx` | `yolov5l_1280x1024_sim.onnx` | 已验证 |
-| YOLOv5x | `yolov5x_640x640_sim.onnx` | `yolov5x_1280x1024_sim.onnx` | 已验证 |
-| 输入契约 | 解码输出 | 已验证 opset |
-| :--- | :--- | :--- |
-| FP32 NCHW `[1,3,640,640]` | FP32 `[1,25200,85]` | 12 |
-| FP32 NCHW `[1,3,1280,1024]` | FP32 `[1,80640,85]` | 19 |
+P5 表示标准 `yolov5n`、`yolov5s`、`yolov5m`、`yolov5l` 和 `yolov5x` 模型。经典 P6 表示名称带 `6` 后缀的对应模型：`yolov5n6`、`yolov5s6`、`yolov5m6`、`yolov5l6` 和 `yolov5x6`。
 
-已验证文件位于本地 `weights/yolov5/onnx_sim/`，均使用像素坐标 `xywh` 和标准 COCO 80 类顺序。1280×1024 文件名和导出命令中的尺寸顺序与模型 tensor 的高×宽一致。ReleaseNote 报告了全部 10 个模型文件在两个保留应用中的 50 帧测量结果；这些数据仅代表本地本次发布测量，不构成跨平台性能保证。
+验证内容包括 ONNX checker、OpenRT/RPP engine 初始化、1 次完整 pipeline warmup、20 帧 RGB 正式测量、融合 RPP 后处理、非空检测结果和检测图输出。全部 20 个规格还通过了 I420 YUV 应用验证，每项执行 1 次 warmup 和 1 帧正式测量。
 
-YOLOv5u、YOLOv8、自定义类别输出、归一化坐标输出及上表未列出的其他模型系列不在本版本发布范围内。
+### P5 640×640 性能
 
-对于外部 binding 仍为 FP32、且能够被 OpenRT 接受的 Q/DQ INT8 ONNX，本版本保留模型解析和 engine 执行能力，作为实验性功能。INT8 数值精度和端到端检测结果不作为本版本发布验收项。
+| 模型规格 | 前处理 | 推理 | 后处理 | 端到端 | FPS | 状态 |
+|---|---:|---:|---:|---:|---:|---|
+| YOLOv5n 640×640 | 1.546 ms | 3.156 ms | 3.505 ms | 8.207 ms | 121.850 | PASS |
+| YOLOv5s 640×640 | 1.583 ms | 4.393 ms | 3.562 ms | 9.538 ms | 104.840 | PASS |
+| YOLOv5m 640×640 | 1.877 ms | 11.278 ms | 4.595 ms | 17.751 ms | 56.336 | PASS |
+| YOLOv5l 640×640 | 1.816 ms | 17.599 ms | 4.978 ms | 24.393 ms | 40.996 | PASS |
+| YOLOv5x 640×640 | 1.847 ms | 31.235 ms | 4.725 ms | 37.808 ms | 26.449 | PASS |
 
-### ONNX 导出要求
+### P6 640×640 性能
+
+| 模型规格 | 前处理 | 推理 | 后处理 | 端到端 | FPS | 状态 |
+|---|---:|---:|---:|---:|---:|---|
+| YOLOv5n6 640×640 | 1.547 ms | 3.271 ms | 3.471 ms | 8.289 ms | 120.635 | PASS |
+| YOLOv5s6 640×640 | 1.581 ms | 4.555 ms | 3.566 ms | 9.701 ms | 103.077 | PASS |
+| YOLOv5m6 640×640 | 1.771 ms | 11.361 ms | 4.165 ms | 17.298 ms | 57.812 | PASS |
+| YOLOv5l6 640×640 | 1.806 ms | 18.446 ms | 4.852 ms | 25.104 ms | 39.834 | PASS |
+| YOLOv5x6 640×640 | 1.902 ms | 33.006 ms | 4.900 ms | 39.808 ms | 25.121 | PASS |
+
+### P5 1280×1024 性能
+
+| 模型规格 | 前处理 | 推理 | 后处理 | 端到端 | FPS | 状态 |
+|---|---:|---:|---:|---:|---:|---|
+| YOLOv5n 1280×1024 | 2.861 ms | 13.401 ms | 9.982 ms | 26.244 ms | 38.104 | PASS |
+| YOLOv5s 1280×1024 | 2.936 ms | 18.476 ms | 10.283 ms | 31.695 ms | 31.551 | PASS |
+| YOLOv5m 1280×1024 | 3.115 ms | 38.957 ms | 10.318 ms | 52.390 ms | 19.088 | PASS |
+| YOLOv5l 1280×1024 | 2.821 ms | 60.542 ms | 10.106 ms | 73.469 ms | 13.611 | PASS |
+| YOLOv5x 1280×1024 | 2.805 ms | 115.032 ms | 10.302 ms | 128.139 ms | 7.804 | PASS |
+
+### P6 1280×1024 性能
+
+| 模型规格 | 前处理 | 推理 | 后处理 | 端到端 | FPS | 状态 |
+|---|---:|---:|---:|---:|---:|---|
+| YOLOv5n6 1280×1024 | 3.096 ms | 13.737 ms | 10.406 ms | 27.240 ms | 36.711 | PASS |
+| YOLOv5s6 1280×1024 | 3.145 ms | 18.483 ms | 10.249 ms | 31.877 ms | 31.371 | PASS |
+| YOLOv5m6 1280×1024 | 2.993 ms | 39.542 ms | 10.427 ms | 52.962 ms | 18.882 | PASS |
+| YOLOv5l6 1280×1024 | 3.021 ms | 61.985 ms | 10.422 ms | 75.428 ms | 13.258 | PASS |
+| YOLOv5x6 1280×1024 | 2.977 ms | 116.766 ms | 10.521 ms | 130.264 ms | 7.677 | PASS |
+
+每项结果均为完整 pipeline warmup 1 次后正式测量 20 帧的平均值。端到端耗时为 `前处理 + 推理 + 后处理`，不包含 engine 初始化和可视化。这些数据是已验证 RPP 环境下的参考结果，不构成跨平台性能保证。
+
+> **说明：** 进行容量规划或部署规格评估前，请在目标加速卡和软件栈上重新验证性能。
+
+## 附录：从 PT 模型导出 ONNX
+
+### 导出要求
 
 本产品仅支持静态输入维度的 ONNX 模型。导出后必须使用 `onnxsim` 简化模型，并且不要使用 YOLOv5 的 `--dynamic` 导出参数。
 
@@ -699,4 +773,4 @@ python export.py \
 python -m onnxsim yolov5s.onnx yolov5s_sim.onnx
 ```
 
-如需使用已验证的高分辨率契约，请设置 `--imgsz 1280 1024 --opset 19`；尺寸顺序为高、宽。可按需将 `yolov5s.pt` 替换为 `yolov5n.pt`、`yolov5m.pt`、`yolov5l.pt` 或 `yolov5x.pt`。同时更新 `onnxsim` 命令中的输入和输出文件名，并通过 `-m/--model` 传入生成的 `*_sim.onnx`。为便于本地使用，也可将 YOLOv5s 模型放置为 `weights/yolov5s.onnx`，作为未传入模型参数时的可选回退文件。
+如需使用已验证的高分辨率契约，请设置 `--imgsz 1280 1024 --opset 19`；尺寸顺序为高、宽。可按需将 `yolov5s.pt` 替换为已验证的 P5 权重（`yolov5n.pt`、`yolov5m.pt`、`yolov5l.pt` 或 `yolov5x.pt`）或经典 P6 权重（`yolov5n6.pt`、`yolov5s6.pt`、`yolov5m6.pt`、`yolov5l6.pt` 或 `yolov5x6.pt`）。同时更新 `onnxsim` 命令中的输入和输出文件名，并通过 `-m/--model` 传入生成的 `*_sim.onnx`。YOLOv5u 和 P6-u 模型不属于上述已验证契约。为便于本地使用，也可将 YOLOv5s 模型放置为 `weights/yolov5s.onnx`，作为未传入模型参数时的可选回退文件。

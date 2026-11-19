@@ -39,8 +39,6 @@ The current applications use `BGR_HWC` for RGB image input and `YUV_I420` for ra
 
 Use this module when the model exposes a static FP32 NCHW input and expects YOLOv5-style letterbox plus `[0, 1]` normalization. The implementation is a conventional preprocessing stage: it uses local SDK runtime calls and source kernels, but does not use graph capture or graph execution.
 
-An INT8 Q/DQ ONNX model can use the same preprocessor only when its external input remains FP32 NCHW and its external output remains FP32. Raw INT8 input bindings require model-specific scale and zero-point handling and are not accepted by this application. Model parser support must still be verified with the target OpenRT SDK and the actual quantized model.
-
 ---
 
 <a id="chinese"></a>
@@ -83,5 +81,3 @@ An INT8 Q/DQ ONNX model can use the same preprocessor only when its external inp
 ## 复用说明
 
 当模型使用静态 FP32 NCHW 外部输入，并要求 YOLOv5 风格 letterbox 与 `[0, 1]` 归一化时，可复用本模块。该实现是常规独立前处理阶段，仅使用本地 SDK runtime API 与源码 kernel，不使用 Graph capture 或 Graph 执行。
-
-INT8 Q/DQ ONNX 只有在外部输入仍为 FP32 NCHW、外部输出仍为 FP32 时，才可以复用相同前处理。原始 INT8 输入 binding 需要模型专属的 scale 和 zero-point 处理，本应用当前不接受。仍需使用目标 OpenRT SDK 和实际量化模型验证 parser 兼容性。

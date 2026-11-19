@@ -4,7 +4,7 @@
 
 Language switch: click [English](#english) or [中文](#chinese) to jump to the corresponding section.
 
-This module wraps OpenRT on RPP inference for the validated classic YOLOv5n/s/m/l/x detection models at static 640×640 and 1280×1024 input shapes.
+This module wraps OpenRT on RPP inference for the validated COCO80 YOLOv5 P5 and classic P6 n/s/m/l/x detection models at static 640×640 and 1280×1024 input shapes.
 
 ## Responsibilities
 
@@ -45,7 +45,7 @@ The cache is stored under `<model-directory>/.engine_cache/`. Its key includes O
 
 语言切换：点击 [English](#english) 或 [中文](#chinese) 跳转到对应语言章节。
 
-本模块封装已验证的经典 YOLOv5n/s/m/l/x 检测模型在 OpenRT on RPP 上的推理流程，支持静态 640×640 和 1280×1024 输入 shape。
+本模块封装已验证的 COCO80 YOLOv5 P5 和经典 P6 n/s/m/l/x 检测模型在 OpenRT on RPP 上的推理流程，支持静态 640×640 和 1280×1024 输入 shape。
 
 ## 模块职责
 
